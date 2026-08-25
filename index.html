@@ -281,6 +281,31 @@
     white-space: nowrap;
   }
 
+  /* ---- Kết quả còn dở từ lần trước ------------------------------------ */
+  #resume {
+    display: none;
+    margin-top: 20px;
+    border: 1px solid var(--instrumental);
+    border-radius: 10px;
+    background: rgba(78, 205, 196, 0.08);
+    padding: 14px;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  #resumeText { flex: 1; font-size: 13px; min-width: 200px; }
+  #resumeGo {
+    background: var(--instrumental);
+    border: 0;
+    border-radius: 8px;
+    color: var(--ink);
+    font: inherit;
+    font-weight: 800;
+    font-size: 13px;
+    padding: 9px 16px;
+    cursor: pointer;
+  }
+
   .banner {
     border: 1px solid var(--vocals);
     border-radius: 10px;
@@ -347,6 +372,11 @@
         <button id="apiSave" type="button">Lưu</button>
       </div>
     </details>
+  </div>
+
+  <div id="resume">
+    <span id="resumeText"></span>
+    <button id="resumeGo" type="button">Mở kết quả</button>
   </div>
 
   <div id="progress">
@@ -543,7 +573,7 @@ async function loadStems(jobId, stems) {
   duration = Math.max(...tracks.map(t => t.buffer.duration));
   $("tEnd").textContent = fmt(duration);
   applyGains();
-  $("mixer").style.display = "";
+  $("mixer").style.display = "block";
   $("mixer").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -561,7 +591,7 @@ $("seek").oninput = (e) => {
 function showBanner(html) {
   const b = $("banner");
   b.innerHTML = html;
-  b.style.display = "";
+  b.style.display = "block";
 }
 
 async function checkBackend() {
@@ -620,7 +650,7 @@ $("apiSave").onclick = () => {
   API = v || "/api";
   try { v ? localStorage.setItem(STORE_KEY, v) : localStorage.removeItem(STORE_KEY); } catch (e) {}
   $("err").textContent = "";
-  checkBackend();
+  checkBackend().then(ok => { if (ok) resumeJob(); });
 };
 
 // ---- Job flow ------------------------------------------------------------
@@ -674,6 +704,82 @@ function uploadJob(fd, onProgress) {
   });
 }
 
+// Job chạy ở Modal, không phụ thuộc tab này. Trước đây job_id chỉ nằm trong biến
+// cục bộ, nên hết hạn chờ (hoặc đóng tab) là mất dấu — file vẫn nằm trên Volume
+// mà trang không còn gì để mở. Ghi lại để lần sau nhặt lại được.
+const JOB_KEY = "tachnhac.job";
+
+function rememberJob(id, name) {
+  try {
+    localStorage.setItem(JOB_KEY, JSON.stringify({ id, name, at: Date.now() }));
+  } catch (e) {}
+}
+
+function recallJob() {
+  const fromQuery = new URLSearchParams(location.search).get("job");
+  if (fromQuery) return { id: fromQuery, name: "", at: Date.now() };
+  try { return JSON.parse(localStorage.getItem(JOB_KEY) || "null"); } catch (e) { return null; }
+}
+
+async function pollUntilDone(job_id, t0) {
+  const deadline = t0 + MAX_WAIT_MS;
+  let fails = 0;
+
+  while (true) {
+    let job;
+    try {
+      const r = await fetch(`${API}/jobs/${job_id}`, { cache: "no-store" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      job = await r.json();
+      fails = 0;
+    } catch (e) {
+      if (++fails >= MAX_POLL_FAILS) {
+        throw new Error("Mất kết nối với backend khi đang chờ kết quả.");
+      }
+      await new Promise(r => setTimeout(r, POLL_MS));
+      continue;
+    }
+
+    let label = STEP[job.status] || job.status;
+    // Rơi về CPU thì chậm gấp hàng chục lần — nói ra để khỏi tưởng máy treo.
+    if (job.device && job.device === "cpu") label += " (CPU — rất chậm)";
+    $("statusText").textContent = label;
+    $("barFill").style.width = Math.max(6, (job.progress || 0) * 100) + "%";
+
+    if (job.status === "error") throw new Error(job.error || "Tách thất bại.");
+    if (job.status === "done") {
+      if (!(job.stems || []).length) throw new Error("Backend báo xong nhưng không có track nào.");
+      return job;
+    }
+
+    // Đứng mãi ở "queued" là chuyện khác hẳn với việc tách lâu: container chưa
+    // từng khởi động. Tách bạch hai ca này để khỏi phải chờ hết 20 phút.
+    if (job.status === "queued" && Date.now() - t0 > 4 * 60 * 1000) {
+      throw new Error(
+        "Job nằm ở hàng đợi hơn 4 phút mà container GPU chưa khởi động.\n" +
+        `Thường là Modal chưa cấp phát được GPU. Mở ${API}/diag để kiểm tra.`
+      );
+    }
+
+    if (Date.now() > deadline) {
+      throw new Error(
+        `Trang đã chờ 20 phút, job vẫn ở trạng thái "${job.status}"` +
+        (job.device ? ` trên ${job.device}` : "") + ".\n" +
+        "Job vẫn đang chạy tiếp ở Modal — tải lại trang sau ít phút để lấy kết quả."
+      );
+    }
+
+    await new Promise(r => setTimeout(r, POLL_MS));
+  }
+}
+
+async function finishJob(job_id, job) {
+  $("statusText").textContent =
+    `Xong trong ${job.seconds} giây${job.device ? " trên " + job.device : ""}` +
+    " — nhấn phát để nghe thử";
+  await loadStems(job_id, job.stems);
+}
+
 $("go").onclick = async () => {
   const file = $("file").files[0];
   $("err").textContent = "";
@@ -682,9 +788,10 @@ $("go").onclick = async () => {
   if (file.size > 60 * 1024 * 1024) { $("err").textContent = "File quá lớn — tối đa 60 MB."; return; }
 
   $("go").disabled = true;
+  $("resume").style.display = "none";
   $("mixer").style.display = "none";
   if (playing) pause(false);
-  $("progress").style.display = "";
+  $("progress").style.display = "block";
   $("statusText").textContent = "Đang tải lên…";
   $("barFill").style.width = "6%";
 
@@ -698,61 +805,10 @@ $("go").onclick = async () => {
       $("statusText").textContent = `Đang tải lên… ${Math.round(frac * 100)}%`;
     });
 
+    rememberJob(job_id, file.name);
     $("statusText").textContent = STEP.queued;
-    const t0 = Date.now();
-    const deadline = t0 + MAX_WAIT_MS;
-    let fails = 0;
-
-    while (true) {
-      await new Promise(r => setTimeout(r, POLL_MS));
-
-      let job;
-      try {
-        const r = await fetch(`${API}/jobs/${job_id}`, { cache: "no-store" });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        job = await r.json();
-        fails = 0;
-      } catch (e) {
-        if (++fails >= MAX_POLL_FAILS) {
-          throw new Error("Mất kết nối với backend khi đang chờ kết quả.");
-        }
-        continue;
-      }
-
-      let label = STEP[job.status] || job.status;
-      // Rơi về CPU thì chậm gấp hàng chục lần — nói ra để khỏi tưởng máy treo.
-      if (job.device && job.device === "cpu") label += " (CPU — rất chậm)";
-      $("statusText").textContent = label;
-      $("barFill").style.width = Math.max(6, (job.progress || 0) * 100) + "%";
-
-      // Đứng mãi ở "queued" là chuyện khác hẳn với việc tách lâu: container chưa
-      // từng khởi động. Tách bạch hai ca này để khỏi phải chờ hết 20 phút.
-      if (job.status === "queued" && Date.now() - t0 > 4 * 60 * 1000) {
-        throw new Error(
-          "Job nằm ở hàng đợi hơn 4 phút mà container GPU chưa khởi động.\n" +
-          "Thường là Modal chưa cấp phát được GPU cho tài khoản. Mở " +
-          `${API}/diag để kiểm tra, hoặc xem log app trên dashboard Modal.`
-        );
-      }
-
-      if (job.status === "error") throw new Error(job.error || "Tách thất bại.");
-      if (job.status === "done") {
-        const stems = job.stems || [];
-        if (!stems.length) throw new Error("Backend báo xong nhưng không có track nào.");
-        $("statusText").textContent = `Xong trong ${job.seconds} giây — nhấn phát để nghe thử`;
-        await loadStems(job_id, stems);
-        break;
-      }
-
-      if (Date.now() > deadline) {
-        throw new Error(
-          `Quá thời gian chờ — job vẫn ở trạng thái "${job.status}"` +
-          (job.device ? ` trên ${job.device}` : "") + ".\n" +
-          `Mở ${API}/diag để xem container GPU nạp được gì, hoặc xem log hàm ` +
-          "separate trên dashboard Modal."
-        );
-      }
-    }
+    const job = await pollUntilDone(job_id, Date.now());
+    await finishJob(job_id, job);
   } catch (e) {
     $("err").textContent = e.message;
     $("progress").style.display = "none";
@@ -761,7 +817,52 @@ $("go").onclick = async () => {
   }
 };
 
-checkBackend();
+// ---- Nhặt lại job lần trước ----------------------------------------------
+async function resumeJob() {
+  const saved = recallJob();
+  if (!saved || !saved.id) return;
+
+  let job;
+  try {
+    const r = await fetch(`${API}/jobs/${saved.id}`, { cache: "no-store" });
+    if (!r.ok) return;               // job đã bị dọn sau 24 giờ — im lặng bỏ qua
+    job = await r.json();
+  } catch (e) { return; }
+
+  if (job.status === "done" && (job.stems || []).length) {
+    $("resumeText").textContent =
+      `Có kết quả chưa mở${saved.name ? ": " + saved.name : ""}` +
+      ` — ${job.stems.length} track, tách trong ${job.seconds} giây.`;
+    $("resume").style.display = "flex";
+    $("resumeGo").onclick = async () => {
+      $("resume").style.display = "none";
+      $("err").textContent = "";
+      try {
+        await finishJob(saved.id, job);
+      } catch (e) {
+        $("err").textContent = e.message;
+      }
+    };
+    return;
+  }
+
+  if (job.status === "error") return;
+
+  // Vẫn đang chạy ở Modal — bám lại vòng chờ thay vì bắt tách lại từ đầu.
+  $("progress").style.display = "block";
+  $("go").disabled = true;
+  try {
+    const done = await pollUntilDone(saved.id, saved.at || Date.now());
+    await finishJob(saved.id, done);
+  } catch (e) {
+    $("err").textContent = e.message;
+    $("progress").style.display = "none";
+  } finally {
+    $("go").disabled = false;
+  }
+}
+
+checkBackend().then(ok => { if (ok) resumeJob(); });
 </script>
 </body>
 </html>
