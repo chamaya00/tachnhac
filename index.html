@@ -238,7 +238,59 @@
     color: var(--vocals);
     font-size: 13px;
     margin-top: 14px;
+    white-space: pre-wrap;
   }
+
+  /* ---- Cấu hình backend ---------------------------------------------- */
+  .setup {
+    margin-top: 16px;
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+  }
+  .setup > summary {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    cursor: pointer;
+    list-style: none;
+  }
+  .setup > summary::-webkit-details-marker { display: none; }
+  .setup .hint { color: var(--muted); font-size: 12px; margin: 10px 0; }
+  .setup .hint code, .banner code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ivory);
+    background: var(--ink);
+    border-radius: 4px;
+    padding: 1px 5px;
+    word-break: break-all;
+  }
+  .setup .apirow { display: flex; gap: 8px; }
+  .setup button {
+    background: var(--panel-hi);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    color: var(--ivory);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 16px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .banner {
+    border: 1px solid var(--vocals);
+    border-radius: 10px;
+    background: rgba(255, 92, 122, 0.09);
+    padding: 13px 14px;
+    margin-bottom: 18px;
+    font-size: 13px;
+    display: none;
+  }
+  .banner b { display: block; margin-bottom: 4px; }
 
   footer {
     margin-top: 42px;
@@ -261,6 +313,8 @@
   <h1>Tách <em>giọng</em> khỏi <em>nhạc</em> trong một bước.</h1>
   <p class="lede">Tải lên một bài hát, nhận về từng track riêng biệt — giọng, trống, bass, nhạc cụ. Nghe thử trực tiếp rồi tải về track bạn cần.</p>
 
+  <div class="banner" id="banner"></div>
+
   <div class="card">
     <div class="row">
       <label class="field" for="file">Chọn file âm thanh</label>
@@ -278,6 +332,21 @@
 
     <button class="primary" id="go">Tách nhạc</button>
     <div class="err" id="err"></div>
+
+    <details class="setup" id="setup">
+      <summary>Cấu hình backend</summary>
+      <p class="hint">
+        Dán URL Modal của bạn (dạng <code>https://&lt;user&gt;--tachnhac-api.modal.run</code>).
+        URL lưu trong trình duyệt này, không cần deploy lại. Gửi thẳng tới Modal
+        cũng tránh được giới hạn dung lượng upload của Vercel.
+        Để trống thì trang dùng đường vòng <code>/api</code> theo <code>vercel.json</code>.
+      </p>
+      <div class="apirow">
+        <input type="url" id="apiUrl" placeholder="https://…--tachnhac-api.modal.run"
+               autocapitalize="off" autocorrect="off" spellcheck="false">
+        <button id="apiSave" type="button">Lưu</button>
+      </div>
+    </details>
   </div>
 
   <div id="progress">
@@ -302,8 +371,21 @@
 </div>
 
 <script>
-// Backend đi qua rewrite của Vercel (xem vercel.json) nên cùng gốc với trang này.
-const API = "/api";
+// ---- Địa chỉ backend -----------------------------------------------------
+// Mặc định đi qua rewrite của Vercel (xem vercel.json). Nhưng rewrite của Vercel
+// có giới hạn dung lượng request, file nhạc vài chục MB sẽ bị chặn ở đó — nên
+// nếu dán thẳng URL Modal thì trang gọi trực tiếp, không qua trung gian.
+const STORE_KEY = "tachnhac.api";
+const trim = (u) => (u || "").trim().replace(/\/+$/, "");
+
+let API = (() => {
+  const fromQuery = new URLSearchParams(location.search).get("api");
+  if (fromQuery) {
+    try { localStorage.setItem(STORE_KEY, trim(fromQuery)); } catch (e) {}
+    return trim(fromQuery);
+  }
+  try { return trim(localStorage.getItem(STORE_KEY)) || "/api"; } catch (e) { return "/api"; }
+})();
 
 const $ = (id) => document.getElementById(id);
 const COLORS = {
@@ -314,6 +396,8 @@ const LABELS = {
   vocals: "Giọng hát", instrumental: "Nhạc nền",
   drums: "Trống", bass: "Bass", other: "Nhạc cụ khác"
 };
+const labelOf = (n) => LABELS[String(n).toLowerCase()] || n;
+const colorOf = (n) => COLORS[String(n).toLowerCase()] || "var(--other)";
 
 // ---- Audio engine --------------------------------------------------------
 let ctx, tracks = [], duration = 0, playing = false, startedAt = 0, offset = 0, raf;
@@ -337,6 +421,7 @@ function stopSources() {
 }
 
 function play() {
+  if (!tracks.length) return;
   if (ctx.state === "suspended") ctx.resume();
   const at = ctx.currentTime + 0.06;
   tracks.forEach(t => {
@@ -399,21 +484,22 @@ function buildMixer(jobId, stems) {
   tracks = [];
 
   stems.forEach(name => {
-    const color = COLORS[name] || "var(--other)";
     const el = document.createElement("div");
     el.className = "strip";
-    el.style.setProperty("--c", color);
+    el.style.setProperty("--c", colorOf(name));
     el.innerHTML = `
       <div class="strip-head">
-        <span class="strip-name">${LABELS[name] || name}</span>
+        <span class="strip-name"></span>
         <button class="tog" aria-pressed="false" title="Tắt tiếng">M</button>
         <button class="tog" aria-pressed="false" title="Chỉ nghe track này">S</button>
-        <a class="dl" href="${API}/jobs/${jobId}/stems/${name}" download>Tải</a>
+        <a class="dl" href="${API}/jobs/${jobId}/stems/${encodeURIComponent(name)}" download>Tải</a>
       </div>
       <div class="fader">
-        <input type="range" min="0" max="100" value="100" aria-label="Âm lượng ${LABELS[name] || name}">
+        <input type="range" min="0" max="100" value="100">
         <div class="meter"><i></i></div>
       </div>`;
+    el.querySelector(".strip-name").textContent = labelOf(name);
+    el.querySelector(".fader input").setAttribute("aria-label", "Âm lượng " + labelOf(name));
     box.appendChild(el);
 
     const gain = ctx.createGain();
@@ -443,9 +529,15 @@ async function loadStems(jobId, stems) {
   buildMixer(jobId, stems);
 
   await Promise.all(tracks.map(async t => {
-    const res = await fetch(`${API}/jobs/${jobId}/stems/${t.name}`);
-    if (!res.ok) throw new Error(`Không tải được track ${t.name}`);
-    t.buffer = await ctx.decodeAudioData(await res.arrayBuffer());
+    const url = `${API}/jobs/${jobId}/stems/${encodeURIComponent(t.name)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Không tải được track ${labelOf(t.name)} (HTTP ${res.status}).`);
+    const bytes = await res.arrayBuffer();
+    try {
+      t.buffer = await ctx.decodeAudioData(bytes);
+    } catch (e) {
+      throw new Error(`Không giải mã được track ${labelOf(t.name)} — file trả về có thể không phải audio.`);
+    }
   }));
 
   duration = Math.max(...tracks.map(t => t.buffer.duration));
@@ -457,6 +549,7 @@ async function loadStems(jobId, stems) {
 
 $("play").onclick = () => playing ? pause() : play();
 $("seek").oninput = (e) => {
+  if (!duration) return;
   const wasPlaying = playing;
   if (wasPlaying) pause(false);
   offset = (e.target.value / 1000) * duration;
@@ -464,13 +557,121 @@ $("seek").oninput = (e) => {
   if (wasPlaying) play();
 };
 
+// ---- Kiểm tra backend ----------------------------------------------------
+function showBanner(html) {
+  const b = $("banner");
+  b.innerHTML = html;
+  b.style.display = "";
+}
+
+async function checkBackend() {
+  $("apiUrl").value = API === "/api" ? "" : API;
+  $("banner").style.display = "none";
+
+  let res;
+  try {
+    res = await fetch(`${API}/models`, { cache: "no-store" });
+  } catch (e) {
+    showBanner(
+      "<b>Chưa kết nối được backend.</b>" +
+      (API === "/api"
+        ? "Trang đang gọi <code>/api</code>, tức là dựa vào rewrite trong <code>vercel.json</code> — " +
+          "chỗ đó vẫn còn <code>REPLACE-ME</code> nếu bạn chưa sửa. " +
+          "Mở <b>Cấu hình backend</b> bên dưới và dán URL Modal vào là chạy ngay."
+        : `Không gọi được <code>${API}</code>. Kiểm tra xem app Modal đã <code>modal deploy</code> chưa, và URL có đúng không.`)
+    );
+    $("setup").open = true;
+    $("go").disabled = true;
+    return false;
+  }
+
+  if (!res.ok) {
+    showBanner(`<b>Backend trả về lỗi HTTP ${res.status}.</b>Kiểm tra log của app Modal.`);
+    $("setup").open = true;
+    $("go").disabled = true;
+    return false;
+  }
+
+  // Đồng bộ danh sách model từ backend, để hai bên không lệch nhau.
+  try {
+    const models = await res.json();
+    const sel = $("model");
+    const keep = sel.value;
+    sel.innerHTML = "";
+    Object.entries(models).forEach(([key, m]) => {
+      const opt = document.createElement("option");
+      opt.value = key;
+      opt.textContent = `${m.label} — ${(m.stems || []).map(labelOf).join(", ")}`;
+      sel.appendChild(opt);
+    });
+    if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
+  } catch (e) { /* giữ nguyên danh sách tĩnh trong HTML */ }
+
+  $("go").disabled = false;
+  return true;
+}
+
+$("apiSave").onclick = () => {
+  const v = trim($("apiUrl").value);
+  if (v && !/^https?:\/\//i.test(v)) {
+    $("err").textContent = "URL phải bắt đầu bằng https://";
+    return;
+  }
+  API = v || "/api";
+  try { v ? localStorage.setItem(STORE_KEY, v) : localStorage.removeItem(STORE_KEY); } catch (e) {}
+  $("err").textContent = "";
+  checkBackend();
+};
+
 // ---- Job flow ------------------------------------------------------------
 const STEP = {
   queued: "Đang xếp hàng…",
-  loading_model: "Đang khởi động GPU…",
+  loading_model: "Đang khởi động GPU và nạp model…",
   separating: "Đang tách — thường mất 30–60 giây",
+  finalizing: "Đang đóng gói kết quả…",
   done: "Xong"
 };
+
+const POLL_MS = 2000;
+const MAX_WAIT_MS = 20 * 60 * 1000;   // job treo quá lâu thì báo, đừng quay mãi
+const MAX_POLL_FAILS = 5;             // mạng chớp nhoáng không nên giết cả job
+
+// fetch không báo được tiến độ upload; XHR thì có. File 60 MB trên 4G mất hàng
+// chục giây, thanh tiến độ đứng im là lúc người dùng tưởng app hỏng.
+function uploadJob(fd, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API}/jobs`);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      let body = null;
+      try { body = JSON.parse(xhr.responseText); } catch (e) {}
+      if (xhr.status >= 200 && xhr.status < 300 && body && body.job_id) {
+        resolve(body);
+      } else if (xhr.status === 413) {
+        reject(new Error(
+          "Máy chủ từ chối vì file quá lớn (HTTP 413).\n" +
+          (API === "/api"
+            ? "Đường vòng qua Vercel giới hạn dung lượng upload. Dán thẳng URL Modal ở mục Cấu hình backend để gửi trực tiếp."
+            : "Giảm dung lượng file xuống dưới 60 MB.")
+        ));
+      } else {
+        const d = body && body.detail;
+        reject(new Error(
+          typeof d === "string" ? d : `Tải lên thất bại (HTTP ${xhr.status}).`
+        ));
+      }
+    };
+    xhr.onerror = () => reject(new Error(
+      "Không gửi được file lên backend. Kiểm tra kết nối mạng và URL backend."
+    ));
+    xhr.ontimeout = () => reject(new Error("Tải lên quá lâu, đã huỷ."));
+    xhr.timeout = 10 * 60 * 1000;
+    xhr.send(fd);
+  });
+}
 
 $("go").onclick = async () => {
   const file = $("file").files[0];
@@ -481,6 +682,7 @@ $("go").onclick = async () => {
 
   $("go").disabled = true;
   $("mixer").style.display = "none";
+  if (playing) pause(false);
   $("progress").style.display = "";
   $("statusText").textContent = "Đang tải lên…";
   $("barFill").style.width = "6%";
@@ -490,22 +692,47 @@ $("go").onclick = async () => {
     fd.append("file", file);
     fd.append("model", $("model").value);
 
-    const res = await fetch(`${API}/jobs`, { method: "POST", body: fd });
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Tải lên thất bại.");
-    const { job_id } = await res.json();
+    const { job_id } = await uploadJob(fd, (frac) => {
+      $("barFill").style.width = (6 + frac * 24) + "%";
+      $("statusText").textContent = `Đang tải lên… ${Math.round(frac * 100)}%`;
+    });
+
+    $("statusText").textContent = STEP.queued;
+    const deadline = Date.now() + MAX_WAIT_MS;
+    let fails = 0;
 
     while (true) {
-      await new Promise(r => setTimeout(r, 2000));
-      const job = await (await fetch(`${API}/jobs/${job_id}`)).json();
+      await new Promise(r => setTimeout(r, POLL_MS));
+
+      let job;
+      try {
+        const r = await fetch(`${API}/jobs/${job_id}`, { cache: "no-store" });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        job = await r.json();
+        fails = 0;
+      } catch (e) {
+        if (++fails >= MAX_POLL_FAILS) {
+          throw new Error("Mất kết nối với backend khi đang chờ kết quả.");
+        }
+        continue;
+      }
 
       $("statusText").textContent = STEP[job.status] || job.status;
       $("barFill").style.width = Math.max(6, (job.progress || 0) * 100) + "%";
 
       if (job.status === "error") throw new Error(job.error || "Tách thất bại.");
       if (job.status === "done") {
+        const stems = job.stems || [];
+        if (!stems.length) throw new Error("Backend báo xong nhưng không có track nào.");
         $("statusText").textContent = `Xong trong ${job.seconds} giây — nhấn phát để nghe thử`;
-        await loadStems(job_id, job.stems);
+        await loadStems(job_id, stems);
         break;
+      }
+
+      if (Date.now() > deadline) {
+        throw new Error(
+          `Quá thời gian chờ (job vẫn ở trạng thái "${job.status}"). Xem log app Modal để biết chi tiết.`
+        );
       }
     }
   } catch (e) {
@@ -515,6 +742,8 @@ $("go").onclick = async () => {
     $("go").disabled = false;
   }
 };
+
+checkBackend();
 </script>
 </body>
 </html>

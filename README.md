@@ -20,49 +20,41 @@ Không cần S3/R2 cho bản đầu — Modal Volume làm luôn phần lưu tr�
 
 ## Deploy (làm được hoàn toàn từ iPhone)
 
-### 1. Modal
+### 1. Modal — backend
+
+Workflow `.github/workflows/deploy.yml` đã có sẵn trong repo, chỉ cần cắm token:
 
 1. Đăng ký tại modal.com, tạo API token trong dashboard.
-2. Đưa `modal_app.py` lên một repo GitHub (dùng trình soạn thảo web của GitHub).
-3. Tạo `.github/workflows/deploy.yml`:
+2. Trong repo GitHub: **Settings → Secrets and variables → Actions → New repository secret**,
+   thêm `MODAL_TOKEN_ID` và `MODAL_TOKEN_SECRET`.
+3. Vào tab **Actions → Deploy Modal → Run workflow** (hoặc push một commit chạm vào
+   `modal_app.py`).
+4. Lần build đầu mất khoảng 8–12 phút (image CUDA + torch). Log của bước
+   `modal deploy` in ra URL endpoint, dạng `https://<user>--tachnhac-api.modal.run`.
+   **Chép URL này lại.**
 
-```yaml
-name: Deploy Modal
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - run: pip install modal
-      - run: modal deploy modal_app.py
-        env:
-          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
-          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-```
-
-4. Thêm `MODAL_TOKEN_ID` và `MODAL_TOKEN_SECRET` vào Settings → Secrets → Actions.
-5. Push. Lần build đầu mất khoảng 5–8 phút (cài torch). Log sẽ in ra URL endpoint.
+Kiểm tra nhanh: mở `https://<user>--tachnhac-api.modal.run/health` trên trình
+duyệt, phải thấy `{"ok": true, ...}`.
 
 ### 2. Frontend
 
-Đặt `index.html` và `vercel.json` chung một thư mục (ví dụ `web/`).
+`index.html` và `vercel.json` nằm ngay ở gốc repo.
 
-1. Mở `vercel.json`, thay `REPLACE-ME--tachnhac-api.modal.run` bằng URL Modal thật.
-2. Import repo vào Vercel:
+1. Import repo vào Vercel:
    - Framework Preset: **Other**
-   - Root Directory: `web`
+   - Root Directory: **để trống** (gốc repo)
    - Build Command / Output Directory: để trống
-3. Deploy.
+2. Deploy.
+3. Mở trang, bung mục **Cấu hình backend**, dán URL Modal ở bước 1 rồi bấm **Lưu**.
 
-Frontend gọi `/api/...`, Vercel chuyển tiếp sang Modal. Trình duyệt thấy mọi thứ cùng một gốc nên không có CORS, không phải cấu hình URL ở phía client.
+URL được lưu trong trình duyệt, không phải deploy lại mỗi lần đổi. Muốn chia sẻ
+link đã cấu hình sẵn thì thêm query: `https://trang-cua-ban.vercel.app/?api=https://<user>--tachnhac-api.modal.run`.
+
+Nếu để trống ô cấu hình, trang sẽ gọi `/api` và dựa vào rewrite trong
+`vercel.json` — khi đó phải tự thay `REPLACE-ME--tachnhac-api.modal.run` bằng URL
+thật. **Không khuyến khích**: rewrite của Vercel giới hạn dung lượng request nên
+file nhạc vài chục MB sẽ bị chặn với lỗi HTTP 413. Gửi thẳng tới Modal thì không
+vướng (backend đã bật CORS `*`).
 
 ## Mô hình
 
@@ -80,6 +72,16 @@ Weights tự tải lần chạy đầu rồi cache vào Volume `tachnhac-models`
 - **Rẻ hơn**: đổi `gpu="A10G"` thành `gpu="T4"` — chậm hơn khoảng 2x, giá thấp hơn.
 - **Preview 30s**: cắt input bằng ffmpeg trước khi tách, chỉ trả full stem sau khi thanh toán.
 - **Giữ container ấm**: thêm `min_containers=1` vào `@app.function` của `separate` để bỏ cold start (~15s), đổi lại trả tiền GPU liên tục — chỉ bật khi có traffic thật.
+
+## Khi có trục trặc
+
+| Triệu chứng | Nguyên nhân thường gặp |
+|---|---|
+| Banner đỏ "Chưa kết nối được backend" | Chưa deploy Modal, hoặc URL trong ô cấu hình sai. Thử mở `/health` trực tiếp. |
+| Lỗi HTTP 413 khi tải lên | Đang đi qua `/api` của Vercel. Dán URL Modal vào ô cấu hình để gửi thẳng. |
+| Kẹt ở "Đang xếp hàng…" | Container GPU chưa khởi động xong (lần đầu ~1–2 phút do phải tải weights), hoặc worker chết. Xem log trong dashboard Modal. |
+| "Quá thời gian chờ" | Job treo — kiểm tra log `separate` trên Modal. |
+| Báo lỗi tên model | Weights chưa tải được. Xoá Volume `tachnhac-models` rồi chạy lại. |
 
 ## Việc còn lại trước khi mở cho người ngoài
 
