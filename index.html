@@ -361,10 +361,9 @@
     <details class="setup" id="setup">
       <summary>Cấu hình backend</summary>
       <p class="hint">
-        Dán URL Modal của bạn (dạng <code>https://&lt;user&gt;--tachnhac-api.modal.run</code>).
-        URL lưu trong trình duyệt này, không cần deploy lại. Gửi thẳng tới Modal
-        cũng tránh được giới hạn dung lượng upload của Vercel.
-        Để trống thì trang dùng đường vòng <code>/api</code> theo <code>vercel.json</code>.
+        Trang đã có sẵn URL backend, bình thường không cần đụng tới đây.
+        Ô này để trỏ sang một backend Modal khác khi cần thử nghiệm — URL chỉ lưu
+        trong trình duyệt này. Để trống rồi bấm Lưu là quay về mặc định.
       </p>
       <div class="apirow">
         <input type="url" id="apiUrl" placeholder="https://…--tachnhac-api.modal.run"
@@ -402,9 +401,11 @@
 
 <script>
 // ---- Địa chỉ backend -----------------------------------------------------
-// Mặc định đi qua rewrite của Vercel (xem vercel.json). Nhưng rewrite của Vercel
-// có giới hạn dung lượng request, file nhạc vài chục MB sẽ bị chặn ở đó — nên
-// nếu dán thẳng URL Modal thì trang gọi trực tiếp, không qua trung gian.
+// Nằm sẵn trong code để người vào trang không phải cấu hình gì. Gọi thẳng Modal
+// chứ không qua rewrite của Vercel: rewrite giới hạn dung lượng request nên file
+// nhạc vài chục MB sẽ bị chặn ở đó.
+const DEFAULT_API = "https://tphuc3519--tachnhac-api.modal.run";
+
 const STORE_KEY = "tachnhac.api";
 const trim = (u) => (u || "").trim().replace(/\/+$/, "");
 
@@ -414,8 +415,13 @@ let API = (() => {
     try { localStorage.setItem(STORE_KEY, trim(fromQuery)); } catch (e) {}
     return trim(fromQuery);
   }
-  try { return trim(localStorage.getItem(STORE_KEY)) || "/api"; } catch (e) { return "/api"; }
+  try { return trim(localStorage.getItem(STORE_KEY)) || DEFAULT_API; }
+  catch (e) { return DEFAULT_API; }
 })();
+
+// Ô cấu hình chỉ dành cho lúc hỏng hoặc khi tự gọi bằng ?setup=1. Người dùng
+// bình thường không bao giờ thấy nó.
+const SHOW_SETUP = new URLSearchParams(location.search).has("setup");
 
 const $ = (id) => document.getElementById(id);
 const COLORS = {
@@ -594,32 +600,41 @@ function showBanner(html) {
   b.style.display = "block";
 }
 
+function failBackend(html) {
+  showBanner(html);
+  // Chỉ lôi ô cấu hình ra khi thật sự hỏng — để còn cứu được tại chỗ.
+  $("setup").style.display = "block";
+  $("setup").open = true;
+  $("go").disabled = true;
+  return false;
+}
+
 async function checkBackend() {
-  $("apiUrl").value = API === "/api" ? "" : API;
+  $("apiUrl").value = API === DEFAULT_API ? "" : API;
+  $("setup").style.display = SHOW_SETUP ? "block" : "none";
   $("banner").style.display = "none";
 
+  const url = `${API}/models`;
   let res;
   try {
-    res = await fetch(`${API}/models`, { cache: "no-store" });
+    res = await fetch(url, { cache: "no-store" });
   } catch (e) {
-    showBanner(
+    return failBackend(
       "<b>Chưa kết nối được backend.</b>" +
-      (API === "/api"
-        ? "Trang đang gọi <code>/api</code>, tức là dựa vào rewrite trong <code>vercel.json</code> — " +
-          "chỗ đó vẫn còn <code>REPLACE-ME</code> nếu bạn chưa sửa. " +
-          "Mở <b>Cấu hình backend</b> bên dưới và dán URL Modal vào là chạy ngay."
-        : `Không gọi được <code>${API}</code>. Kiểm tra xem app Modal đã <code>modal deploy</code> chưa, và URL có đúng không.`)
+      `Không gọi được <code>${url}</code>. ` +
+      "Có thể app Modal chưa chạy, hoặc mạng đang chặn."
     );
-    $("setup").open = true;
-    $("go").disabled = true;
-    return false;
   }
 
   if (!res.ok) {
-    showBanner(`<b>Backend trả về lỗi HTTP ${res.status}.</b>Kiểm tra log của app Modal.`);
-    $("setup").open = true;
-    $("go").disabled = true;
-    return false;
+    return failBackend(
+      `<b>Backend trả về lỗi HTTP ${res.status}.</b>` +
+      `Đã gọi <code>${url}</code>. ` +
+      (res.status === 404
+        ? "Địa chỉ này không có endpoint <code>/models</code> — nhiều khả năng URL backend sai. " +
+          "Xoá ô bên dưới rồi bấm Lưu để quay về mặc định."
+        : "Xem log của app Modal.")
+    );
   }
 
   // Đồng bộ danh sách model từ backend, để hai bên không lệch nhau.
@@ -647,7 +662,7 @@ $("apiSave").onclick = () => {
     $("err").textContent = "URL phải bắt đầu bằng https://";
     return;
   }
-  API = v || "/api";
+  API = v || DEFAULT_API;
   try { v ? localStorage.setItem(STORE_KEY, v) : localStorage.removeItem(STORE_KEY); } catch (e) {}
   $("err").textContent = "";
   checkBackend().then(ok => { if (ok) resumeJob(); });
