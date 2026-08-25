@@ -24,7 +24,10 @@ image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04", add_python="3.11"
     )
-    .apt_install("ffmpeg", "git")
+    # clang + build-essential: demucs kéo theo diffq, gói này không có wheel dựng
+    # sẵn nên pip phải biên dịch extension C. Bản Python standalone của Modal được
+    # build bằng clang nên sysconfig ghi CC=clang — cài mỗi gcc sẽ không cứu được.
+    .apt_install("ffmpeg", "git", "clang", "build-essential")
     .pip_install(
         # >=0.28 là mốc có tham số custom_output_names trong Separator.separate()
         "audio-separator[gpu]>=0.28,<1.0",
