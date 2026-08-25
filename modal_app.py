@@ -6,6 +6,8 @@ Endpoint sẽ có dạng: https://<user>--tachnhac-api.modal.run
 """
 
 import os
+import re
+import shutil
 import time
 import uuid
 
@@ -16,13 +18,16 @@ APP_NAME = "tachnhac"
 # ---------------------------------------------------------------------------
 # Image
 # ---------------------------------------------------------------------------
-# audio-separator kéo theo torch + onnxruntime-gpu. Build lần đầu ~5-8 phút,
-# sau đó Modal cache lại nên deploy tiếp theo gần như tức thì.
+# Nền CUDA + cuDNN có sẵn: onnxruntime-gpu cần libcudnn.so.9, debian_slim không
+# có nên trước đây nó lặng lẽ tụt về CPU (hoặc chết khi tạo session).
 image = (
-    modal.Image.debian_slim(python_version="3.11")
-    .apt_install("ffmpeg")
+    modal.Image.from_registry(
+        "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04", add_python="3.11"
+    )
+    .apt_install("ffmpeg", "git")
     .pip_install(
-        "audio-separator[gpu]",
+        # >=0.28 là mốc có tham số custom_output_names trong Separator.separate()
+        "audio-separator[gpu]>=0.28,<1.0",
         "fastapi[standard]",
         "python-multipart",
     )
@@ -63,6 +68,20 @@ MODELS = {
 MAX_UPLOAD_BYTES = 60 * 1024 * 1024  # 60 MB
 JOB_TTL_SECONDS = 24 * 3600
 
+# Phần mở rộng được phép. Giữ lại đuôi file là bắt buộc: audio-separator dựa vào
+# nó để chọn decoder, file tên "input" trần không mở được với m4a/aac/flac.
+ALLOWED_EXTS = {".mp3", ".wav", ".m4a", ".mp4", ".flac", ".ogg", ".opus", ".aac", ".wma"}
+DEFAULT_EXT = ".mp3"
+
+
+def _input_path(job_id: str, ext: str) -> str:
+    return f"/data/{job_id}/input{ext}"
+
+
+def _safe_ext(filename: str | None) -> str:
+    ext = os.path.splitext(filename or "")[1].lower()
+    return ext if ext in ALLOWED_EXTS else DEFAULT_EXT
+
 
 # ---------------------------------------------------------------------------
 # GPU worker
@@ -71,15 +90,14 @@ JOB_TTL_SECONDS = 24 * 3600
     gpu="A10G",
     volumes={"/models": models_vol, "/data": data_vol},
     timeout=1800,
-    retries=1,
+    # retries=0: lần chạy lại sẽ ghi đè trạng thái "error" mà frontend vừa đọc
+    # được, làm giao diện nhảy loạn. Thà báo lỗi dứt khoát một lần.
+    retries=0,
 )
-def separate(job_id: str, model_key: str):
+def separate(job_id: str, model_key: str, ext: str = DEFAULT_EXT):
     from audio_separator.separator import Separator
 
     cfg = MODELS[model_key]
-    in_path = f"/data/{job_id}/input"
-    out_dir = f"/data/{job_id}/stems"
-    os.makedirs(out_dir, exist_ok=True)
 
     def mark(**kw):
         job = jobs.get(job_id, {})
@@ -88,7 +106,17 @@ def separate(job_id: str, model_key: str):
 
     try:
         mark(status="loading_model", progress=0.1)
+
+        # reload trước khi tạo thư mục: reload dựng lại view của volume, làm
+        # trước rồi mới ghi thì chắc chắn thấy file input do container API đẩy lên.
         data_vol.reload()
+
+        in_path = _input_path(job_id, ext)
+        if not os.path.exists(in_path):
+            raise RuntimeError("Không tìm thấy file đã tải lên trên volume.")
+
+        out_dir = f"/data/{job_id}/stems"
+        os.makedirs(out_dir, exist_ok=True)
 
         separator = Separator(
             model_file_dir="/models",
@@ -101,26 +129,87 @@ def separate(job_id: str, model_key: str):
         mark(status="separating", progress=0.35)
         t0 = time.time()
 
-        # Ép tên file đầu ra thành tên stem, để frontend gọi thẳng /stems/vocals
-        output_names = {stem: stem.lower() for stem in cfg["stems"]}
-        separator.separate(in_path, output_names)
+        # Ép tên file đầu ra thành tên stem, để frontend gọi thẳng /stems/vocals.
+        # Đưa cả hai kiểu viết hoa vì tuỳ kiến trúc model mà audio-separator dùng
+        # "Vocals" hay "vocals" làm khoá tra cứu; khoá thừa bị bỏ qua vô hại.
+        output_names = {}
+        for stem in cfg["stems"]:
+            output_names[stem] = stem.lower()
+            output_names[stem.lower()] = stem.lower()
 
-        produced = sorted(
-            f for f in os.listdir(out_dir) if f.lower().endswith((".mp3", ".wav"))
-        )
+        try:
+            separator.separate(in_path, custom_output_names=output_names)
+        except TypeError:
+            # Bản audio-separator quá cũ chưa có custom_output_names — vẫn chạy
+            # được, tên file sẽ được chuẩn hoá ở bước dưới.
+            separator.separate(in_path)
+
+        mark(status="finalizing", progress=0.9)
+        produced = _normalize_stem_files(out_dir, cfg["stems"])
+        if not produced:
+            raise RuntimeError("Model chạy xong nhưng không sinh ra file stem nào.")
+
         data_vol.commit()
 
         mark(
             status="done",
             progress=1.0,
-            stems=[os.path.splitext(f)[0] for f in produced],
-            files={os.path.splitext(f)[0]: f for f in produced},
+            stems=list(produced.keys()),
+            files=produced,
             seconds=round(time.time() - t0, 1),
             finished_at=time.time(),
         )
     except Exception as exc:  # noqa: BLE001
-        mark(status="error", error=str(exc)[:400], finished_at=time.time())
+        mark(status="error", error=f"{type(exc).__name__}: {exc}"[:400],
+             finished_at=time.time())
         raise
+
+
+def _normalize_stem_files(out_dir: str, stems: list[str]) -> dict[str, str]:
+    """Đổi tên file đầu ra thành đúng <stem>.<ext>.
+
+    custom_output_names không phải lúc nào cũng ăn — tuỳ kiến trúc model, tên
+    file có thể ra dạng "input_(Vocals)_model_bs_roformer_....mp3". Frontend gọi
+    /stems/vocals nên tên phải đoán trước được, không thể phó mặc cho model.
+    """
+    found: dict[str, str] = {}
+    leftovers: list[str] = []
+
+    for name in sorted(os.listdir(out_dir)):
+        if not name.lower().endswith((".mp3", ".wav", ".flac")):
+            continue
+        base, ext = os.path.splitext(name)
+        low = base.lower()
+
+        match = None
+        for stem in stems:
+            key = stem.lower()
+            if low == key or re.search(rf"[(\[_\-]{key}[)\]_\-]?", low):
+                match = key
+                break
+
+        if match is None or match in found:
+            leftovers.append(name)
+            continue
+
+        target = f"{match}{ext.lower()}"
+        if name != target:
+            shutil.move(os.path.join(out_dir, name), os.path.join(out_dir, target))
+        found[match] = target
+
+    # Không khớp được stem nào (tên file lạ hoàn toàn) → vẫn phục vụ, đặt theo
+    # thứ tự stem còn trống, hơn là trả về rỗng và hỏng cả job.
+    for name in leftovers:
+        remaining = [s.lower() for s in stems if s.lower() not in found]
+        if not remaining:
+            break
+        ext = os.path.splitext(name)[1].lower()
+        target = f"{remaining[0]}{ext}"
+        shutil.move(os.path.join(out_dir, name), os.path.join(out_dir, target))
+        found[remaining[0]] = target
+
+    # Trả về theo đúng thứ tự khai báo trong MODELS cho giao diện gọn mắt.
+    return {s.lower(): found[s.lower()] for s in stems if s.lower() in found}
 
 
 # ---------------------------------------------------------------------------
@@ -142,10 +231,15 @@ def api():
         allow_headers=["*"],
     )
 
+    @web.get("/health")
+    def health():
+        return {"ok": True, "app": APP_NAME, "models": list(MODELS)}
+
     @web.get("/models")
     def list_models():
         return {
-            k: {"label": v["label"], "stems": v["stems"]} for k, v in MODELS.items()
+            k: {"label": v["label"], "stems": [s.lower() for s in v["stems"]]}
+            for k, v in MODELS.items()
         }
 
     @web.post("/jobs")
@@ -164,9 +258,10 @@ def api():
                 413, f"File quá lớn. Giới hạn {MAX_UPLOAD_BYTES // 1024 // 1024} MB."
             )
 
+        ext = _safe_ext(file.filename)
         job_id = uuid.uuid4().hex
         os.makedirs(f"/data/{job_id}", exist_ok=True)
-        with open(f"/data/{job_id}/input", "wb") as fh:
+        with open(_input_path(job_id, ext), "wb") as fh:
             fh.write(raw)
         data_vol.commit()
 
@@ -175,9 +270,10 @@ def api():
             "progress": 0.0,
             "model": model,
             "filename": file.filename,
+            "ext": ext,
             "created_at": time.time(),
         }
-        separate.spawn(job_id, model)
+        separate.spawn(job_id, model, ext)
         return {"job_id": job_id}
 
     @web.get("/jobs/{job_id}")
@@ -190,10 +286,12 @@ def api():
     @web.get("/jobs/{job_id}/stems/{stem}")
     def download_stem(job_id: str, stem: str):
         job = jobs.get(job_id)
-        if job is None or job.get("status") != "done":
-            raise HTTPException(404, "Stem chưa sẵn sàng.")
+        if job is None:
+            raise HTTPException(404, "Không tìm thấy job.")
+        if job.get("status") != "done":
+            raise HTTPException(409, "Stem chưa sẵn sàng.")
 
-        filename = job.get("files", {}).get(stem)
+        filename = job.get("files", {}).get(stem.lower())
         if not filename:
             raise HTTPException(404, f"Không có stem '{stem}'.")
 
@@ -218,8 +316,6 @@ def api():
 # ---------------------------------------------------------------------------
 @app.function(volumes={"/data": data_vol}, schedule=modal.Period(hours=6))
 def cleanup():
-    import shutil
-
     data_vol.reload()
     now = time.time()
     removed = 0
