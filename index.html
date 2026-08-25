@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tách nhạc — tách giọng và nhạc nền khỏi bài hát</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #12101c;
+    --panel: #1b1830;
+    --panel-hi: #262146;
+    --line: #302b52;
+    --ivory: #f2eee6;
+    --muted: #8b85a8;
+    --vocals: #ff5c7a;
+    --instrumental: #4ecdc4;
+    --drums: #ffb454;
+    --bass: #9b7bff;
+    --other: #4ecdc4;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--ivory);
+    font-family: 'Be Vietnam Pro', system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    padding: 0 0 env(safe-area-inset-bottom);
+  }
+
+  .wrap { max-width: 720px; margin: 0 auto; padding: 32px 20px 64px; }
+
+  /* ---- Hero ---------------------------------------------------------- */
+  .eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 14px;
+  }
+
+  h1 {
+    font-size: clamp(34px, 9vw, 56px);
+    font-weight: 800;
+    line-height: 1.02;
+    letter-spacing: -0.03em;
+    margin: 0 0 16px;
+  }
+  h1 em {
+    font-style: normal;
+    background: linear-gradient(90deg, var(--vocals), var(--bass) 55%, var(--instrumental));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .lede { color: var(--muted); margin: 0 0 32px; max-width: 46ch; }
+
+  /* ---- Upload -------------------------------------------------------- */
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 20px;
+  }
+
+  label.field {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  input[type=file], select, input[type=url] {
+    width: 100%;
+    background: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    color: var(--ivory);
+    padding: 12px;
+    font: inherit;
+    font-size: 14px;
+  }
+  input[type=file]::file-selector-button {
+    background: var(--panel-hi);
+    border: 0;
+    border-radius: 6px;
+    color: var(--ivory);
+    font: inherit;
+    font-size: 13px;
+    padding: 7px 12px;
+    margin-right: 12px;
+  }
+
+  .row { margin-bottom: 16px; }
+
+  button.primary {
+    width: 100%;
+    background: var(--ivory);
+    color: var(--ink);
+    border: 0;
+    border-radius: 9px;
+    padding: 14px;
+    font: inherit;
+    font-weight: 800;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  button.primary:disabled { opacity: 0.4; cursor: default; }
+
+  /* ---- Progress ------------------------------------------------------ */
+  #progress { margin-top: 28px; display: none; }
+  .bar {
+    height: 5px;
+    background: var(--line);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-top: 12px;
+  }
+  .bar > i {
+    display: block;
+    height: 100%;
+    width: 0;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--bass), var(--vocals));
+    transition: width 0.5s ease;
+  }
+  .status {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* ---- Mixer (signature) --------------------------------------------- */
+  #mixer { margin-top: 28px; display: none; }
+
+  .transport {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+  .playbtn {
+    width: 54px; height: 54px;
+    flex: 0 0 54px;
+    border-radius: 50%;
+    border: 0;
+    background: var(--ivory);
+    color: var(--ink);
+    font-size: 19px;
+    cursor: pointer;
+  }
+  .scrub { flex: 1; }
+  .scrub input { width: 100%; accent-color: var(--vocals); }
+  .time {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .strip {
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--c);
+    border-radius: 10px;
+    padding: 13px 14px;
+    margin-bottom: 10px;
+    background: var(--panel);
+  }
+  .strip.dim { opacity: 0.35; }
+
+  .strip-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .strip-name {
+    font-weight: 800;
+    font-size: 14px;
+    letter-spacing: -0.01em;
+    flex: 1;
+  }
+  .tog {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    width: 30px; height: 30px;
+    border-radius: 7px;
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .tog[aria-pressed=true] { background: var(--c); border-color: var(--c); color: var(--ink); }
+
+  .dl {
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--muted);
+    text-decoration: none;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 7px 9px;
+  }
+  .dl:hover { color: var(--ivory); }
+
+  .fader { display: flex; align-items: center; gap: 11px; }
+  .fader input { flex: 1; accent-color: var(--c); }
+
+  /* live level meter — cho thấy stem nào đang thực sự phát ra tiếng */
+  .meter {
+    width: 46px; height: 6px;
+    flex: 0 0 46px;
+    background: var(--ink);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .meter > i {
+    display: block; height: 100%; width: 0;
+    background: var(--c);
+    transition: width 0.06s linear;
+  }
+
+  .err {
+    color: var(--vocals);
+    font-size: 13px;
+    margin-top: 14px;
+  }
+
+  footer {
+    margin-top: 42px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+  :focus-visible { outline: 2px solid var(--instrumental); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p class="eyebrow">Tách nguồn âm thanh</p>
+  <h1>Tách <em>giọng</em> khỏi <em>nhạc</em> trong một bước.</h1>
+  <p class="lede">Tải lên một bài hát, nhận về từng track riêng biệt — giọng, trống, bass, nhạc cụ. Nghe thử trực tiếp rồi tải về track bạn cần.</p>
+
+  <div class="card">
+    <div class="row">
+      <label class="field" for="file">Chọn file âm thanh</label>
+      <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.flac">
+    </div>
+
+    <div class="row">
+      <label class="field" for="model">Kiểu tách</label>
+      <select id="model">
+        <option value="roformer">Giọng + Nhạc nền — chất lượng cao nhất</option>
+        <option value="htdemucs_ft">4 track: giọng, trống, bass, nhạc cụ</option>
+        <option value="htdemucs">4 track — nhanh hơn, hơi kém sạch</option>
+      </select>
+    </div>
+
+    <button class="primary" id="go">Tách nhạc</button>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div id="progress">
+    <div class="status" id="statusText">Đang tải lên…</div>
+    <div class="bar"><i id="barFill"></i></div>
+  </div>
+
+  <div id="mixer">
+    <div class="transport">
+      <button class="playbtn" id="play" aria-label="Phát">▶</button>
+      <div class="scrub">
+        <input type="range" id="seek" min="0" max="1000" value="0" aria-label="Vị trí phát">
+        <div class="time"><span id="tNow">0:00</span><span id="tEnd">0:00</span></div>
+      </div>
+    </div>
+    <div id="strips"></div>
+  </div>
+
+  <footer>
+    File của bạn được xoá tự động sau 24 giờ. Chỉ tải lên nội dung bạn có quyền sử dụng.
+  </footer>
+</div>
+
+<script>
+// Backend đi qua rewrite của Vercel (xem vercel.json) nên cùng gốc với trang này.
+const API = "/api";
+
+const $ = (id) => document.getElementById(id);
+const COLORS = {
+  vocals: "var(--vocals)", instrumental: "var(--instrumental)",
+  drums: "var(--drums)", bass: "var(--bass)", other: "var(--other)"
+};
+const LABELS = {
+  vocals: "Giọng hát", instrumental: "Nhạc nền",
+  drums: "Trống", bass: "Bass", other: "Nhạc cụ khác"
+};
+
+// ---- Audio engine --------------------------------------------------------
+let ctx, tracks = [], duration = 0, playing = false, startedAt = 0, offset = 0, raf;
+
+function fmt(s) {
+  s = Math.max(0, Math.floor(s));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function applyGains() {
+  const soloed = tracks.some(t => t.solo);
+  tracks.forEach(t => {
+    const audible = t.mute ? 0 : (soloed && !t.solo ? 0 : t.volume);
+    t.gain.gain.setTargetAtTime(audible, ctx.currentTime, 0.01);
+    t.el.classList.toggle("dim", audible === 0);
+  });
+}
+
+function stopSources() {
+  tracks.forEach(t => { if (t.src) { try { t.src.stop(); } catch (e) {} t.src = null; } });
+}
+
+function play() {
+  if (ctx.state === "suspended") ctx.resume();
+  const at = ctx.currentTime + 0.06;
+  tracks.forEach(t => {
+    const src = ctx.createBufferSource();
+    src.buffer = t.buffer;
+    src.connect(t.gain);
+    src.start(at, offset);
+    t.src = src;
+  });
+  startedAt = at;
+  playing = true;
+  $("play").textContent = "❚❚";
+  $("play").setAttribute("aria-label", "Tạm dừng");
+  tick();
+}
+
+function pause(keepPos = true) {
+  if (keepPos && playing) offset = Math.min(duration, ctx.currentTime - startedAt + offset);
+  stopSources();
+  playing = false;
+  $("play").textContent = "▶";
+  $("play").setAttribute("aria-label", "Phát");
+  cancelAnimationFrame(raf);
+  drawMeters(true);
+}
+
+function position() {
+  return playing ? Math.min(duration, ctx.currentTime - startedAt + offset) : offset;
+}
+
+function drawMeters(zero = false) {
+  tracks.forEach(t => {
+    let level = 0;
+    if (!zero) {
+      t.analyser.getByteTimeDomainData(t.buf);
+      let peak = 0;
+      for (let i = 0; i < t.buf.length; i += 4) {
+        const v = Math.abs(t.buf[i] - 128) / 128;
+        if (v > peak) peak = v;
+      }
+      level = Math.min(1, peak * 1.6);
+    }
+    t.meterFill.style.width = (level * 100) + "%";
+  });
+}
+
+function tick() {
+  const p = position();
+  if (p >= duration) { pause(false); offset = 0; $("seek").value = 0; $("tNow").textContent = "0:00"; return; }
+  $("seek").value = Math.round((p / duration) * 1000);
+  $("tNow").textContent = fmt(p);
+  drawMeters();
+  raf = requestAnimationFrame(tick);
+}
+
+// ---- Mixer UI ------------------------------------------------------------
+function buildMixer(jobId, stems) {
+  const box = $("strips");
+  box.innerHTML = "";
+  tracks = [];
+
+  stems.forEach(name => {
+    const color = COLORS[name] || "var(--other)";
+    const el = document.createElement("div");
+    el.className = "strip";
+    el.style.setProperty("--c", color);
+    el.innerHTML = `
+      <div class="strip-head">
+        <span class="strip-name">${LABELS[name] || name}</span>
+        <button class="tog" aria-pressed="false" title="Tắt tiếng">M</button>
+        <button class="tog" aria-pressed="false" title="Chỉ nghe track này">S</button>
+        <a class="dl" href="${API}/jobs/${jobId}/stems/${name}" download>Tải</a>
+      </div>
+      <div class="fader">
+        <input type="range" min="0" max="100" value="100" aria-label="Âm lượng ${LABELS[name] || name}">
+        <div class="meter"><i></i></div>
+      </div>`;
+    box.appendChild(el);
+
+    const gain = ctx.createGain();
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    gain.connect(analyser);
+    analyser.connect(ctx.destination);
+
+    const t = {
+      name, el, gain, analyser,
+      buf: new Uint8Array(analyser.fftSize),
+      meterFill: el.querySelector(".meter > i"),
+      volume: 1, mute: false, solo: false, buffer: null, src: null
+    };
+
+    const [mBtn, sBtn] = el.querySelectorAll(".tog");
+    mBtn.onclick = () => { t.mute = !t.mute; mBtn.setAttribute("aria-pressed", t.mute); applyGains(); };
+    sBtn.onclick = () => { t.solo = !t.solo; sBtn.setAttribute("aria-pressed", t.solo); applyGains(); };
+    el.querySelector(".fader input").oninput = (e) => { t.volume = e.target.value / 100; applyGains(); };
+
+    tracks.push(t);
+  });
+}
+
+async function loadStems(jobId, stems) {
+  ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+  buildMixer(jobId, stems);
+
+  await Promise.all(tracks.map(async t => {
+    const res = await fetch(`${API}/jobs/${jobId}/stems/${t.name}`);
+    if (!res.ok) throw new Error(`Không tải được track ${t.name}`);
+    t.buffer = await ctx.decodeAudioData(await res.arrayBuffer());
+  }));
+
+  duration = Math.max(...tracks.map(t => t.buffer.duration));
+  $("tEnd").textContent = fmt(duration);
+  applyGains();
+  $("mixer").style.display = "";
+  $("mixer").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+$("play").onclick = () => playing ? pause() : play();
+$("seek").oninput = (e) => {
+  const wasPlaying = playing;
+  if (wasPlaying) pause(false);
+  offset = (e.target.value / 1000) * duration;
+  $("tNow").textContent = fmt(offset);
+  if (wasPlaying) play();
+};
+
+// ---- Job flow ------------------------------------------------------------
+const STEP = {
+  queued: "Đang xếp hàng…",
+  loading_model: "Đang khởi động GPU…",
+  separating: "Đang tách — thường mất 30–60 giây",
+  done: "Xong"
+};
+
+$("go").onclick = async () => {
+  const file = $("file").files[0];
+  $("err").textContent = "";
+
+  if (!file) { $("err").textContent = "Chọn một file âm thanh."; return; }
+  if (file.size > 60 * 1024 * 1024) { $("err").textContent = "File quá lớn — tối đa 60 MB."; return; }
+
+  $("go").disabled = true;
+  $("mixer").style.display = "none";
+  $("progress").style.display = "";
+  $("statusText").textContent = "Đang tải lên…";
+  $("barFill").style.width = "6%";
+
+  try {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("model", $("model").value);
+
+    const res = await fetch(`${API}/jobs`, { method: "POST", body: fd });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Tải lên thất bại.");
+    const { job_id } = await res.json();
+
+    while (true) {
+      await new Promise(r => setTimeout(r, 2000));
+      const job = await (await fetch(`${API}/jobs/${job_id}`)).json();
+
+      $("statusText").textContent = STEP[job.status] || job.status;
+      $("barFill").style.width = Math.max(6, (job.progress || 0) * 100) + "%";
+
+      if (job.status === "error") throw new Error(job.error || "Tách thất bại.");
+      if (job.status === "done") {
+        $("statusText").textContent = `Xong trong ${job.seconds} giây — nhấn phát để nghe thử`;
+        await loadStems(job_id, job.stems);
+        break;
+      }
+    }
+  } catch (e) {
+    $("err").textContent = e.message;
+    $("progress").style.display = "none";
+  } finally {
+    $("go").disabled = false;
+  }
+};
+</script>
+</body>
+</html>
