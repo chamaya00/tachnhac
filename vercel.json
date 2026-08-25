@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://REPLACE-ME--tachnhac-api.modal.run/:path*"
+      "destination": "https://tphuc3519--tachnhac-api.modal.run/:path*"
     }
   ]
 }
