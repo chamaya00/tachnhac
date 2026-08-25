@@ -626,6 +626,7 @@ $("apiSave").onclick = () => {
 // ---- Job flow ------------------------------------------------------------
 const STEP = {
   queued: "Đang xếp hàng…",
+  starting: "Container GPU đã nhận việc…",
   loading_model: "Đang khởi động GPU và nạp model…",
   separating: "Đang tách — thường mất 30–60 giây",
   finalizing: "Đang đóng gói kết quả…",
@@ -698,7 +699,8 @@ $("go").onclick = async () => {
     });
 
     $("statusText").textContent = STEP.queued;
-    const deadline = Date.now() + MAX_WAIT_MS;
+    const t0 = Date.now();
+    const deadline = t0 + MAX_WAIT_MS;
     let fails = 0;
 
     while (true) {
@@ -717,8 +719,21 @@ $("go").onclick = async () => {
         continue;
       }
 
-      $("statusText").textContent = STEP[job.status] || job.status;
+      let label = STEP[job.status] || job.status;
+      // Rơi về CPU thì chậm gấp hàng chục lần — nói ra để khỏi tưởng máy treo.
+      if (job.device && job.device === "cpu") label += " (CPU — rất chậm)";
+      $("statusText").textContent = label;
       $("barFill").style.width = Math.max(6, (job.progress || 0) * 100) + "%";
+
+      // Đứng mãi ở "queued" là chuyện khác hẳn với việc tách lâu: container chưa
+      // từng khởi động. Tách bạch hai ca này để khỏi phải chờ hết 20 phút.
+      if (job.status === "queued" && Date.now() - t0 > 4 * 60 * 1000) {
+        throw new Error(
+          "Job nằm ở hàng đợi hơn 4 phút mà container GPU chưa khởi động.\n" +
+          "Thường là Modal chưa cấp phát được GPU cho tài khoản. Mở " +
+          `${API}/diag để kiểm tra, hoặc xem log app trên dashboard Modal.`
+        );
+      }
 
       if (job.status === "error") throw new Error(job.error || "Tách thất bại.");
       if (job.status === "done") {
@@ -731,7 +746,10 @@ $("go").onclick = async () => {
 
       if (Date.now() > deadline) {
         throw new Error(
-          `Quá thời gian chờ (job vẫn ở trạng thái "${job.status}"). Xem log app Modal để biết chi tiết.`
+          `Quá thời gian chờ — job vẫn ở trạng thái "${job.status}"` +
+          (job.device ? ` trên ${job.device}` : "") + ".\n" +
+          `Mở ${API}/diag để xem container GPU nạp được gì, hoặc xem log hàm ` +
+          "separate trên dashboard Modal."
         );
       }
     }

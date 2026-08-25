@@ -98,16 +98,29 @@ def _safe_ext(filename: str | None) -> str:
     retries=0,
 )
 def separate(job_id: str, model_key: str, ext: str = DEFAULT_EXT):
-    from audio_separator.separator import Separator
-
-    cfg = MODELS[model_key]
-
     def mark(**kw):
         job = jobs.get(job_id, {})
         job.update(kw)
         jobs[job_id] = job
 
+    # Mọi thứ nằm trong try, kể cả import. Trước đây import đứng ngoài, nên khi
+    # audio_separator không nạp được (torch/onnxruntime thiếu thư viện CUDA) thì
+    # ngoại lệ bay ra mà không ai ghi lại — job treo ở "queued" vĩnh viễn.
     try:
+        # Dấu hiệu container đã thực sự nhận việc. Job đứng mãi ở "queued" nghĩa
+        # là container chưa từng khởi động, thường vì chưa cấp phát được GPU.
+        mark(status="starting", progress=0.05, started_at=time.time())
+
+        import torch
+
+        from audio_separator.separator import Separator
+
+        # Ghi lại thiết bị thật sự dùng. Rơi về CPU thì BS-Roformer chậm gấp
+        # hàng chục lần, đủ để chạm hạn chờ 20 phút của frontend.
+        on_gpu = torch.cuda.is_available()
+        mark(device=torch.cuda.get_device_name(0) if on_gpu else "cpu")
+
+        cfg = MODELS[model_key]
         mark(status="loading_model", progress=0.1)
 
         # reload trước khi tạo thư mục: reload dựng lại view của volume, làm
@@ -216,6 +229,43 @@ def _normalize_stem_files(out_dir: str, stems: list[str]) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Dò môi trường
+# ---------------------------------------------------------------------------
+@app.function(gpu="A10G", volumes={"/models": models_vol}, timeout=600)
+def gpu_probe():
+    """Kiểm tra container GPU nạp được những gì. Gọi qua GET /diag."""
+    info = {}
+
+    try:
+        import torch
+
+        info["torch"] = torch.__version__
+        info["cuda_available"] = torch.cuda.is_available()
+        info["cuda_version"] = torch.version.cuda
+        if torch.cuda.is_available():
+            info["gpu"] = torch.cuda.get_device_name(0)
+    except Exception as exc:  # noqa: BLE001
+        info["torch_error"] = f"{type(exc).__name__}: {exc}"[:300]
+
+    try:
+        import onnxruntime as ort
+
+        info["onnxruntime"] = ort.__version__
+        info["providers"] = ort.get_available_providers()
+    except Exception as exc:  # noqa: BLE001
+        info["onnxruntime_error"] = f"{type(exc).__name__}: {exc}"[:300]
+
+    try:
+        from audio_separator.separator import Separator  # noqa: F401
+
+        info["audio_separator"] = "import OK"
+    except Exception as exc:  # noqa: BLE001
+        info["audio_separator_error"] = f"{type(exc).__name__}: {exc}"[:300]
+
+    return info
+
+
+# ---------------------------------------------------------------------------
 # HTTP API
 # ---------------------------------------------------------------------------
 @app.function(volumes={"/data": data_vol}, timeout=600)
@@ -237,6 +287,17 @@ def api():
     @web.get("/health")
     def health():
         return {"ok": True, "app": APP_NAME, "models": list(MODELS)}
+
+    @web.get("/diag")
+    def diag():
+        """Khởi động một container GPU và báo cáo nó nạp được gì.
+
+        Chặn tới khi container chạy xong nên có thể mất 1-2 phút lần đầu.
+        """
+        try:
+            return {"ok": True, "probe": gpu_probe.remote()}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"[:600]}
 
     @web.get("/models")
     def list_models():
