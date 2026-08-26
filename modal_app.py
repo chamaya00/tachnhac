@@ -115,6 +115,12 @@ YT_HOSTS = {
     "youtu.be", "www.youtu.be", "youtube-nocookie.com", "www.youtube-nocookie.com",
 }
 SPOTIFY_HOSTS = {"open.spotify.com", "play.spotify.com", "spotify.link"}
+# vm./vt. là link rút gọn khi bấm Chia sẻ trong app — yt-dlp tự lần theo chuyển
+# hướng, không cần ta giải trước.
+TIKTOK_HOSTS = {
+    "tiktok.com", "www.tiktok.com", "m.tiktok.com",
+    "vm.tiktok.com", "vt.tiktok.com",
+}
 
 # Bài dài hơn mốc này gần như chắc chắn không phải một ca khúc: mix DJ, podcast,
 # livestream vài tiếng. Chặn từ đầu, đừng để GPU chạy 20 phút rồi mới vỡ.
@@ -142,7 +148,7 @@ PLAYER_CLIENT_CHAIN = (None, ["tv"], ["android_vr"], ["web_embedded"])
 
 
 def _classify_link(url: str) -> str:
-    """Trả về "youtube" | "spotify", hoặc ném ValueError nếu không nhận."""
+    """Trả về "youtube" | "spotify" | "tiktok", hoặc ném ValueError."""
     parts = urllib.parse.urlparse(url)
     if parts.scheme not in ("http", "https"):
         raise ValueError("Link phải bắt đầu bằng http:// hoặc https://")
@@ -152,7 +158,9 @@ def _classify_link(url: str) -> str:
         return "youtube"
     if host in SPOTIFY_HOSTS:
         return "spotify"
-    raise ValueError("Hiện chỉ nhận link YouTube hoặc Spotify.")
+    if host in TIKTOK_HOSTS:
+        return "tiktok"
+    raise ValueError("Hiện chỉ nhận link YouTube, Spotify hoặc TikTok.")
 
 
 def _http_get(url: str, timeout: int = 15) -> str:
@@ -265,9 +273,14 @@ def _looks_like_bot_check(message: str) -> bool:
     )
 
 
-def _friendly_download_error(exc: Exception) -> str:
+def _friendly_download_error(exc: Exception, kind: str = "youtube") -> str:
     msg = str(exc)
     if _looks_like_bot_check(msg):
+        if kind == "tiktok":
+            return (
+                "TikTok đang chặn máy chủ và đòi xác minh không phải robot. "
+                "Tải video về máy rồi dùng Cách 1 ở trên."
+            )
         return (
             "YouTube đang chặn máy chủ và đòi xác minh không phải robot. "
             "Cách nhanh nhất: tải bài về máy rồi dùng Cách 1 ở trên. "
@@ -472,15 +485,20 @@ def _clear_partials(job_id: str) -> None:
             pass
 
 
-def _download_with_fallbacks(job_id: str, target: str, mark) -> dict:
+def _download_with_fallbacks(job_id: str, target: str, mark, kind: str = "youtube") -> dict:
     """Thử lần lượt các player client cho tới khi qua được màn chặn bot.
 
     Chỉ đổi client khi lỗi đúng là bị chặn bot; lỗi khác (video riêng tư, bài
     quá dài, mạng hỏng) thì ném ra ngay — thử lại chỉ tổ mất thêm vài chục giây
     rồi cũng hỏng y như vậy.
+
+    Chuỗi client là thứ riêng của YouTube (extractor_args gắn khoá "youtube").
+    Nguồn khác thì thử lại y hệt 4 lần, chỉ mất thời gian — nên chạy một lần.
     """
+    chain = PLAYER_CLIENT_CHAIN if kind in ("youtube", "spotify") else (None,)
+
     last = None
-    for attempt, client in enumerate(PLAYER_CLIENT_CHAIN):
+    for attempt, client in enumerate(chain):
         if attempt:
             _clear_partials(job_id)
             mark(status="downloading", progress=0.05,
@@ -507,6 +525,10 @@ def fetch_and_separate(job_id: str, url: str, model_key: str):
         job.update(kw)
         jobs[job_id] = job
 
+    # Gán trước khi vào try: nhánh báo lỗi bên dưới đọc kind, mà nếu hỏng ngay ở
+    # mark() đầu tiên thì kind chưa kịp có giá trị — NameError sẽ che mất lỗi thật.
+    kind = "youtube"
+
     try:
         mark(status="resolving", progress=0.02, started_at=time.time())
 
@@ -522,7 +544,7 @@ def fetch_and_separate(job_id: str, url: str, model_key: str):
         os.makedirs(f"/data/{job_id}", exist_ok=True)
         mark(status="downloading", progress=0.05)
 
-        info = _download_with_fallbacks(job_id, target, mark)
+        info = _download_with_fallbacks(job_id, target, mark, kind)
 
         path = _find_downloaded(job_id)
         size = os.path.getsize(path)
@@ -553,7 +575,8 @@ def fetch_and_separate(job_id: str, url: str, model_key: str):
         # Lỗi do link người dùng đưa vào — nói thẳng, không bọc thêm.
         mark(status="error", error=str(exc)[:400], finished_at=time.time())
     except Exception as exc:  # noqa: BLE001
-        mark(status="error", error=_friendly_download_error(exc), finished_at=time.time())
+        mark(status="error", error=_friendly_download_error(exc, kind),
+             finished_at=time.time())
         raise
 
 
@@ -763,7 +786,7 @@ def api():
             "models": list(MODELS),
             # Frontend dùng cờ này để ẩn tab "Dán link" nếu backend còn bản cũ.
             "link_import": True,
-            "link_sources": ["youtube", "spotify"],
+            "link_sources": ["youtube", "spotify", "tiktok"],
             "max_source_seconds": MAX_SOURCE_SECONDS,
         }
 

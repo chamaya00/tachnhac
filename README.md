@@ -70,7 +70,7 @@ vướng (backend đã bật CORS `*`).
 Trang bày sẵn hai cách, cùng lúc trên một trang, mỗi cách một nút riêng:
 
 1. **Thả file từ máy** — chọn hoặc kéo thả file, như trước giờ.
-2. **Dán link YouTube/Spotify** — máy chủ tự tải bài về rồi tách.
+2. **Dán link YouTube / Spotify / TikTok** — máy chủ tự tải bài về rồi tách.
 
 Cố tình không dùng tab: tab nào cũng phải chọn sẵn một cái, mà chọn sẵn thì có
 lúc phải tự chuyển — người dùng thấy trang tự nhảy và tưởng hỏng.
@@ -79,24 +79,35 @@ lúc phải tự chuyển — người dùng thấy trang tự nhảy và tưở
 |---|---|
 | YouTube (`youtube.com`, `youtu.be`, `music.youtube.com`) | yt-dlp tải thẳng luồng audio tốt nhất, ffmpeg chuyển sang MP3 192 kbps. |
 | Spotify (`open.spotify.com/track/…`, `spotify.link`) | Đọc tên bài + nghệ sĩ từ metadata công khai, rồi tìm đúng bài đó trên YouTube. |
+| TikTok (`tiktok.com`, `vm.tiktok.com`, `vt.tiktok.com`) | Tải thẳng như YouTube. Link rút gọn `vm./vt.` được yt-dlp tự lần theo chuyển hướng. |
 
 Spotify không phát audio ra ngoài trình phát của họ nên không có đường tải thẳng
 — cách trên cũng là cách `spotdl` vẫn làm. Hệ quả: bản lấy về là bản trên
 YouTube, có thể là live, cover hay remaster khác với bản trong playlist. Nghe thử
 ở mixer trước khi tải track về.
 
+Với TikTok, tiếng trong video đã qua một lần nén khi đăng lên, nên tách ra không
+sạch bằng file gốc — dội lại, méo tiếng ở dải cao. Không phải model chạy sai, mà
+là chất lượng đầu vào. Bù lại TikTok không chặn IP máy chủ gắt như YouTube, nên
+khả năng tải được cao hơn.
+
 **Giới hạn**
 
 - Tối đa 12 phút mỗi bài (`MAX_SOURCE_SECONDS` trong `modal_app.py`). Dài hơn thì
   cắt ngắn rồi tải file lên.
 - Chỉ nhận link **một bài**. Album, playlist, podcast đều bị từ chối ngay.
-- Link ngoài hai nguồn trên bị chặn ở cả frontend lẫn backend.
+- Link ngoài ba nguồn trên bị chặn ở cả frontend lẫn backend. Hai đầu dùng cùng
+  một danh sách host, có test đối chiếu để không đầu nào nhận thứ đầu kia chặn.
 
 ### Khi YouTube đòi "xác nhận không phải robot"
 
 Modal chạy trên IP trung tâm dữ liệu, mà YouTube đối xử với dải IP đó gắt nhất.
 Đây là hạn chế của chỗ đặt máy chủ, không phải lỗi cấu hình — **không có cờ nào
 bật lên là hết**.
+
+Mục này chỉ nói về YouTube (và link Spotify, vì cuối cùng cũng tải từ YouTube).
+TikTok không dùng chuỗi client này — `extractor_args` gắn khoá `youtube` nên thử
+lại chỉ tốn thời gian; TikTok hỏng thì báo ngay.
 
 **Backend đã tự làm sẵn** (không cần bạn động tay): khi trúng màn chặn bot, nó
 thử lần lượt các player client `tv` → `android_vr` → `web_embedded`. Theo tài
