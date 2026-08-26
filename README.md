@@ -94,16 +94,88 @@ YouTube, có thể là live, cover hay remaster khác với bản trong playlist
 
 ### Khi YouTube đòi "xác nhận không phải robot"
 
-YouTube chặn IP trung tâm dữ liệu khá gắt, nên yt-dlp chạy trên Modal có lúc bị
-đòi xác minh. Backend tự thử lại một lần với `player_client=tv` — không ăn thì
-báo lỗi kèm hướng dẫn. Cách chữa dứt điểm là nạp cookie:
+Modal chạy trên IP trung tâm dữ liệu, mà YouTube đối xử với dải IP đó gắt nhất.
+Backend tự thử lại một lần với `player_client=tv` (client này không cần PO
+token); không ăn thì báo lỗi. Đây là hạn chế của chỗ đặt máy chủ, không phải lỗi
+cấu hình — **không có cờ nào bật lên là hết**.
 
-1. Dùng một tiện ích trình duyệt xuất cookie của `youtube.com` ra định dạng
-   Netscape (`cookies.txt`). Nên dùng tài khoản phụ.
-2. Đẩy lên volume: `modal volume put tachnhac-data cookies.txt /cookies.txt`
+Ba lựa chọn, xếp theo công sức bỏ ra:
 
-Backend tự nhận file ở `/data/cookies.txt` hoặc `/models/cookies.txt`. Không có
-file thì bỏ qua, không phải lỗi.
+| Cách | Công sức | Bền được bao lâu |
+|---|---|---|
+| Tải bài về máy rồi dùng Cách 1 trên trang | Không có gì | Mãi mãi |
+| Nạp cookie (dưới đây) | Cần máy tính một lần | Vài tuần, rồi phải nạp lại |
+| Thuê proxy dân cư, gắn vào yt-dlp | Tốn tiền hằng tháng | Bền, nhưng phải trả phí |
+
+Với nhu cầu thỉnh thoảng tách một bài, **cách đầu tiên là hợp lý nhất**. Cookie
+chỉ đáng làm nếu bạn dùng thường xuyên và ngại thao tác tải về mỗi lần.
+
+#### Nạp cookie là gì
+
+yt-dlp mang theo cookie đăng nhập của bạn để YouTube tưởng đây là trình duyệt
+của một người thật đã đăng nhập, thay vì một máy chủ lạ. `cookies.txt` chính là
+trạng thái đăng nhập đó xuất ra file, ở định dạng Netscape.
+
+> **Đọc trước khi làm.** Cookie đăng nhập cho phép truy cập tài khoản Google đó.
+> Dùng **tài khoản phụ, tạo riêng cho việc này** — đừng bao giờ dùng tài khoản
+> chính. Google có thể khoá tài khoản khi thấy cookie của nó được dùng từ IP
+> trung tâm dữ liệu, nên hãy coi tài khoản phụ này là thứ có thể mất.
+
+#### Các bước
+
+**Bước 1 — xuất cookie (cần máy tính, làm một lần)**
+
+Bước này không làm được trên iPhone: Safari iOS không có tiện ích xuất cookie.
+Mượn máy tính bất kỳ, dùng Chrome hay Firefox:
+
+1. Đăng nhập YouTube bằng **tài khoản phụ**. Đừng dùng cửa sổ ẩn danh — đóng
+   cửa sổ là cookie mất hiệu lực ngay.
+2. Cài một tiện ích xuất cookie định dạng Netscape (tìm "cookies.txt" trong kho
+   tiện ích của trình duyệt).
+3. Mở youtube.com rồi bấm xuất. Được file `cookies.txt`.
+4. Mở file bằng trình soạn thảo văn bản (Notepad, TextEdit ở chế độ văn bản
+   thuần) và copy **toàn bộ** nội dung.
+
+   Lỗi hay gặp nhất ở đây: copy từ cửa sổ xem trước của trình duyệt làm ký tự
+   TAB biến thành dấu cách, và file mất tác dụng hoàn toàn mà không báo gì.
+   Workflow ở bước 3 sẽ bắt được lỗi này và nói rõ.
+
+**Bước 2 — cất vào GitHub Secret (làm được trên iPhone)**
+
+Repo → **Settings** → **Secrets and variables** → **Actions** →
+**New repository secret**. Tên: `YTDLP_COOKIES`. Dán toàn bộ nội dung vừa copy
+vào ô Secret rồi lưu.
+
+Secret được mã hoá, không hiện lại trong giao diện và không lọt vào log Actions.
+
+**Bước 3 — bấm nạp (làm được trên iPhone)**
+
+Tab **Actions** → **Nạp cookie YouTube** → **Run workflow**.
+
+Workflow soi file trước khi nạp (`scripts/check_cookies.py`): thiếu TAB, hết
+hạn, chưa đăng nhập, hay nhầm cookie trang khác đều bị chặn kèm lời giải thích.
+Qua được thì nó đẩy file lên Modal Volume `tachnhac-data`.
+
+**Không cần deploy lại** — job tách nhạc sau đó tự nhặt file cookie.
+
+**Bước 4 — kiểm tra**
+
+Mở `https://<user>--tachnhac-api.modal.run/diag/cookies`. Đúng thì thấy đại loại:
+
+```json
+{"present": true, "cookies": 42, "logged_in": true,
+ "auth_cookies": ["SAPISID", "SID", "__Secure-1PSID"], "expires_in_days": 58.6}
+```
+
+Endpoint này chỉ đếm và xem hạn, không trả về giá trị cookie nào.
+
+#### Khi cookie hết hạn
+
+`expires_in_days` tụt về 0, hoặc lỗi chặn bot quay lại. YouTube huỷ cookie nhanh
+hơn khi thấy nó dùng từ IP trung tâm dữ liệu, nên vài tuần một lần là chuyện
+thường. Làm lại bước 1–3 (sửa lại secret cũ, không cần tạo mới).
+
+Muốn gỡ cookie ra: chạy lại workflow, bật ô **Xoá cookie đang có**.
 
 **Bản quyền**: chỉ dán link tới nội dung bạn có quyền sử dụng. Việc tải nhạc có
 bản quyền về thường vi phạm điều khoản dịch vụ của YouTube và có thể vi phạm luật
@@ -137,7 +209,8 @@ Weights tự tải lần chạy đầu rồi cache vào Volume `tachnhac-models`
 | "Quá thời gian chờ" | Job treo — kiểm tra log `separate` trên Modal. |
 | Báo lỗi tên model | Weights chưa tải được. Xoá Volume `tachnhac-models` rồi chạy lại. |
 | Ô dán link hiện khung vàng "Backend đang chạy bản cũ" | Backend chưa có `/jobs/link`. Vào Actions → Deploy Modal → Run workflow, chờ build xong rồi tải lại trang. Trong lúc đó vẫn tách được bằng cách thả file. |
-| "YouTube đang chặn máy chủ…" | Bị chặn bot. Nạp cookie theo mục *Tải nhạc từ link*, hoặc tải file về máy rồi dùng tab thả file. |
+| "YouTube đang chặn máy chủ…" | Cách nhanh: tải bài về máy rồi dùng Cách 1. Cách lâu dài: nạp cookie theo mục *Khi YouTube đòi "xác nhận không phải robot"*. |
+| Đã nạp cookie mà vẫn bị chặn | Mở `/diag/cookies`. `logged_in: false` = xuất lúc chưa đăng nhập. `expired: true` = nạp lại file mới. Đúng hết mà vẫn chặn thì IP của Modal đang bị siết, đành dùng Cách 1. |
 | Link Spotify ra nhầm bài | Bản khớp nhất trên YouTube không phải bản gốc. Dán thẳng link YouTube của bản bạn muốn. |
 | "Bài dài … quá mốc 12 phút" | Cắt ngắn file rồi tải lên, hoặc nới `MAX_SOURCE_SECONDS` trong `modal_app.py`. |
 

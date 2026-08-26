@@ -260,8 +260,9 @@ def _friendly_download_error(exc: Exception) -> str:
     if _looks_like_bot_check(msg):
         return (
             "YouTube đang chặn máy chủ và đòi xác minh không phải robot. "
-            "Tải file về máy rồi dùng ô \"Tải file lên\", hoặc nạp cookie cho "
-            "backend (xem README, mục Tải nhạc từ link)."
+            "Cách nhanh nhất: tải bài về máy rồi dùng Cách 1 ở trên. "
+            "Cách chữa lâu dài: nạp cookie cho backend — chạy workflow "
+            "\"Nạp cookie YouTube\" trên GitHub (xem README, mục Tải nhạc từ link)."
         )
     low = msg.lower()
     if "private" in low or "members-only" in low:
@@ -278,6 +279,69 @@ def _cookie_file() -> str | None:
         if os.path.exists(path):
             return path
     return None
+
+
+# Cookie đăng nhập của Google. Thiếu sạch nhóm này thì file chỉ là cookie khách
+# vãng lai — có nạp cũng không qua được màn chặn bot.
+AUTH_COOKIE_NAMES = {
+    "SID", "HSID", "SSID", "APISID", "SAPISID", "LOGIN_INFO",
+    "__Secure-1PSID", "__Secure-3PSID", "__Secure-1PAPISID", "__Secure-3PAPISID",
+}
+
+
+def _cookie_status() -> dict:
+    """Tóm tắt tình trạng file cookie. Không trả về giá trị cookie nào.
+
+    Chỉ đếm và xem hạn — đủ để biết đã nạp đúng chưa mà không biến endpoint này
+    thành chỗ rò cookie đăng nhập.
+    """
+    path = _cookie_file()
+    if not path:
+        return {"present": False, "hint": "Chưa nạp cookie. Xem README, mục Tải nhạc từ link."}
+
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            lines = [
+                l for l in fh.read().splitlines()
+                if l.strip() and not l.lstrip().startswith("#") and "\t" in l
+            ]
+    except OSError as exc:
+        return {"present": True, "readable": False, "error": str(exc)[:200]}
+
+    names, expiries = set(), []
+    for line in lines:
+        parts = line.split("\t")
+        if len(parts) != 7:
+            continue
+        names.add(parts[5])
+        try:
+            value = int(parts[4])
+            if value > 0:
+                expiries.append(value)
+        except ValueError:
+            pass
+
+    now = time.time()
+    live = [e for e in expiries if e > now]
+    auth = sorted(names & AUTH_COOKIE_NAMES)
+
+    out = {
+        "present": True,
+        "path": path,
+        "cookies": len(lines),
+        "auth_cookies": auth,
+        "logged_in": bool(auth),
+    }
+    if live:
+        out["expires_in_days"] = round((min(live) - now) / 86400, 1)
+    elif expiries:
+        out["expired"] = True
+
+    if not auth:
+        out["hint"] = "Thiếu cookie đăng nhập — có thể đã xuất lúc chưa đăng nhập."
+    elif out.get("expired"):
+        out["hint"] = "Cookie đã hết hạn, nạp lại file mới."
+    return out
 
 
 def _ytdlp_download(job_id: str, target: str, mark, player_client=None) -> dict:
@@ -657,6 +721,12 @@ def api():
             return {"ok": True, "probe": gpu_probe.remote()}
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": f"{type(exc).__name__}: {exc}"[:600]}
+
+    @web.get("/diag/cookies")
+    def diag_cookies():
+        """Cookie đã nạp chưa, còn hạn bao lâu. Không trả về giá trị cookie."""
+        data_vol.reload()   # container API có thể đang giữ view cũ của volume
+        return _cookie_status()
 
     @web.get("/models")
     def list_models():

@@ -1,0 +1,76 @@
+# Nạp file cookie YouTube vào Modal Volume.
+#
+# Có workflow này vì `modal volume put` đòi máy tính có cài Modal CLI, mà cả dự
+# án này vốn làm từ điện thoại. Cách dùng: dán nội dung cookies.txt vào secret
+# YTDLP_COOKIES rồi bấm Run workflow — cả hai bước đều làm được trên iPhone.
+name: Nạp cookie YouTube
+
+on:
+  workflow_dispatch:
+    inputs:
+      xoa:
+        description: "Xoá cookie đang có thay vì nạp mới"
+        type: boolean
+        default: false
+
+jobs:
+  cookies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install modal
+
+      - name: Xoá cookie
+        if: ${{ inputs.xoa }}
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          modal volume rm tachnhac-data /cookies.txt || \
+            echo "Không có cookie nào để xoá — coi như xong."
+
+      - name: Kiểm tra secret
+        if: ${{ !inputs.xoa }}
+        env:
+          YTDLP_COOKIES: ${{ secrets.YTDLP_COOKIES }}
+        run: |
+          if [ -z "$YTDLP_COOKIES" ]; then
+            echo "::error::Chưa có secret YTDLP_COOKIES. Vào Settings → Secrets and variables → Actions → New repository secret, đặt tên YTDLP_COOKIES và dán toàn bộ nội dung file cookies.txt vào."
+            exit 1
+          fi
+
+      # printf giữ nguyên xuống dòng; echo có shell biến \t thành ký tự khác.
+      - name: Ghi file cookie
+        if: ${{ !inputs.xoa }}
+        env:
+          YTDLP_COOKIES: ${{ secrets.YTDLP_COOKIES }}
+        run: printf '%s\n' "$YTDLP_COOKIES" > cookies.txt
+
+      - name: Soi file trước khi nạp
+        if: ${{ !inputs.xoa }}
+        run: python3 scripts/check_cookies.py cookies.txt
+
+      - name: Nạp lên Modal Volume
+        if: ${{ !inputs.xoa }}
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: modal volume put tachnhac-data cookies.txt /cookies.txt --force
+
+      - name: Xoá dấu vết trên runner
+        if: always()
+        run: rm -f cookies.txt
+
+      - name: Xong
+        run: |
+          if [ "${{ inputs.xoa }}" = "true" ]; then
+            echo "Đã xoá cookie. Backend quay về chạy không cookie."
+          else
+            echo "Đã nạp cookie. Không cần deploy lại — job sau sẽ tự dùng."
+            echo "Kiểm tra: mở <URL backend>/diag/cookies trên trình duyệt."
+          fi
