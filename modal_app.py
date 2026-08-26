@@ -130,6 +130,16 @@ BROWSER_UA = (
 # phải robot" của YouTube (xem README). Không có thì bỏ qua, không phải lỗi.
 COOKIE_PATHS = ("/data/cookies.txt", "/models/cookies.txt")
 
+# Địa chỉ proxy (một dòng, dạng http://user:pass@host:port). Proxy dân cư là
+# cách duy nhất chữa dứt điểm việc bị chặn theo IP, nhưng phải trả tiền — để
+# ngỏ đường cắm vào, ai cần thì nạp file, không cần sửa code.
+PROXY_PATHS = ("/data/proxy.txt", "/models/proxy.txt")
+
+# Thứ tự thử khi bị chặn bot. Theo tài liệu PO Token của yt-dlp, ba client sau
+# không cần PO token nên còn cơ may lọt khi không có cookie; client mặc định
+# vẫn thử đầu tiên vì khi thông thì nó cho chất lượng tốt nhất.
+PLAYER_CLIENT_CHAIN = (None, ["tv"], ["android_vr"], ["web_embedded"])
+
 
 def _classify_link(url: str) -> str:
     """Trả về "youtube" | "spotify", hoặc ném ValueError nếu không nhận."""
@@ -281,6 +291,20 @@ def _cookie_file() -> str | None:
     return None
 
 
+def _proxy_url() -> str | None:
+    for path in PROXY_PATHS:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as fh:
+                value = fh.read().strip()
+        except OSError:
+            continue
+        if value.startswith(("http://", "https://", "socks5://", "socks5h://")):
+            return value
+    return None
+
+
 # Cookie đăng nhập của Google. Thiếu sạch nhóm này thì file chỉ là cookie khách
 # vãng lai — có nạp cũng không qua được màn chặn bot.
 AUTH_COOKIE_NAMES = {
@@ -389,6 +413,9 @@ def _ytdlp_download(job_id: str, target: str, mark, player_client=None) -> dict:
     cookies = _cookie_file()
     if cookies:
         opts["cookiefile"] = cookies
+    proxy = _proxy_url()
+    if proxy:
+        opts["proxy"] = proxy
     if player_client:
         opts["extractor_args"] = {"youtube": {"player_client": list(player_client)}}
 
@@ -432,6 +459,42 @@ def _find_downloaded(job_id: str) -> str:
     return found[0]
 
 
+def _clear_partials(job_id: str) -> None:
+    """Xoá file dở của lần thử trước.
+
+    Mỗi lần thử dùng chung một outtmpl, nên mảnh .part còn sót lại có thể làm
+    _find_downloaded() vớ nhầm file hỏng của lần trước.
+    """
+    for path in glob.glob(f"/data/{job_id}/input.*"):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _download_with_fallbacks(job_id: str, target: str, mark) -> dict:
+    """Thử lần lượt các player client cho tới khi qua được màn chặn bot.
+
+    Chỉ đổi client khi lỗi đúng là bị chặn bot; lỗi khác (video riêng tư, bài
+    quá dài, mạng hỏng) thì ném ra ngay — thử lại chỉ tổ mất thêm vài chục giây
+    rồi cũng hỏng y như vậy.
+    """
+    last = None
+    for attempt, client in enumerate(PLAYER_CLIENT_CHAIN):
+        if attempt:
+            _clear_partials(job_id)
+            mark(status="downloading", progress=0.05,
+                 attempt=attempt + 1, player_client=",".join(client))
+        try:
+            return _ytdlp_download(job_id, target, mark, player_client=client)
+        except Exception as exc:  # noqa: BLE001
+            if not _looks_like_bot_check(str(exc)):
+                raise
+            last = exc
+
+    raise last if last else RuntimeError("Không tải được, không rõ nguyên nhân.")
+
+
 @app.function(volumes={"/data": data_vol, "/models": models_vol}, timeout=1200, retries=0)
 def fetch_and_separate(job_id: str, url: str, model_key: str):
     """Tải nhạc từ link rồi chuyển tiếp sang worker GPU.
@@ -459,14 +522,7 @@ def fetch_and_separate(job_id: str, url: str, model_key: str):
         os.makedirs(f"/data/{job_id}", exist_ok=True)
         mark(status="downloading", progress=0.05)
 
-        try:
-            info = _ytdlp_download(job_id, target, mark)
-        except Exception as first:  # noqa: BLE001
-            # Client mặc định bị chặn thì thử "tv" — hay lọt hơn khi không cookie.
-            if not _looks_like_bot_check(str(first)):
-                raise
-            mark(status="downloading", progress=0.05)
-            info = _ytdlp_download(job_id, target, mark, player_client=["tv", "web"])
+        info = _download_with_fallbacks(job_id, target, mark)
 
         path = _find_downloaded(job_id)
         size = os.path.getsize(path)

@@ -95,20 +95,38 @@ YouTube, có thể là live, cover hay remaster khác với bản trong playlist
 ### Khi YouTube đòi "xác nhận không phải robot"
 
 Modal chạy trên IP trung tâm dữ liệu, mà YouTube đối xử với dải IP đó gắt nhất.
-Backend tự thử lại một lần với `player_client=tv` (client này không cần PO
-token); không ăn thì báo lỗi. Đây là hạn chế của chỗ đặt máy chủ, không phải lỗi
-cấu hình — **không có cờ nào bật lên là hết**.
+Đây là hạn chế của chỗ đặt máy chủ, không phải lỗi cấu hình — **không có cờ nào
+bật lên là hết**.
 
-Ba lựa chọn, xếp theo công sức bỏ ra:
+**Backend đã tự làm sẵn** (không cần bạn động tay): khi trúng màn chặn bot, nó
+thử lần lượt các player client `tv` → `android_vr` → `web_embedded`. Theo tài
+liệu PO Token của yt-dlp, ba client này không cần PO token nên còn cơ may lọt
+khi không có cookie. Lỗi không phải chặn bot (video riêng tư, bài quá dài) thì
+báo ngay, không thử lại cho phí thời gian.
+
+Hết chuỗi đó mà vẫn bị chặn thì còn ba lựa chọn:
 
 | Cách | Công sức | Bền được bao lâu |
 |---|---|---|
 | Tải bài về máy rồi dùng Cách 1 trên trang | Không có gì | Mãi mãi |
 | Nạp cookie (dưới đây) | Cần máy tính một lần | Vài tuần, rồi phải nạp lại |
-| Thuê proxy dân cư, gắn vào yt-dlp | Tốn tiền hằng tháng | Bền, nhưng phải trả phí |
+| Proxy dân cư | Tốn tiền hằng tháng | Bền nhất, nhưng phải trả phí |
 
 Với nhu cầu thỉnh thoảng tách một bài, **cách đầu tiên là hợp lý nhất**. Cookie
 chỉ đáng làm nếu bạn dùng thường xuyên và ngại thao tác tải về mỗi lần.
+
+Đổi chỗ đặt backend cũng không cứu được: mọi nhà cung cấp serverless (Modal,
+Fly, Render, Lambda…) đều là IP trung tâm dữ liệu. Chỉ máy chạy trên mạng gia
+đình mới có IP dân cư.
+
+#### Proxy dân cư
+
+Backend đọc địa chỉ proxy ở `/data/proxy.txt` (hoặc `/models/proxy.txt`) và cắm
+thẳng vào yt-dlp. Chưa có file thì bỏ qua.
+
+Mua proxy dân cư ở đâu thì tuỳ bạn — repo này không đính kèm nhà cung cấp nào.
+Có địa chỉ rồi: tạo secret `YTDLP_PROXY` (dạng `http://user:pass@host:port`),
+rồi chạy workflow **Nạp cookie YouTube** với ô **Nạp cả proxy** bật lên.
 
 #### Nạp cookie là gì
 

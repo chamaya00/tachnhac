@@ -12,6 +12,10 @@ on:
         description: "Xoá cookie đang có thay vì nạp mới"
         type: boolean
         default: false
+      nap_proxy:
+        description: "Nạp cả proxy từ secret YTDLP_PROXY (nếu có mua)"
+        type: boolean
+        default: false
 
 jobs:
   cookies:
@@ -62,9 +66,31 @@ jobs:
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: modal volume put tachnhac-data cookies.txt /cookies.txt --force
 
+      # Proxy dân cư là cách duy nhất chữa dứt điểm chặn theo IP, nhưng tốn tiền.
+      # Để sẵn đường nạp, ai mua thì dùng.
+      - name: Nạp proxy
+        if: ${{ inputs.nap_proxy && !inputs.xoa }}
+        env:
+          YTDLP_PROXY: ${{ secrets.YTDLP_PROXY }}
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          if [ -z "$YTDLP_PROXY" ]; then
+            echo "::error::Chưa có secret YTDLP_PROXY. Dạng: http://user:pass@host:port"
+            exit 1
+          fi
+          case "$YTDLP_PROXY" in
+            http://*|https://*|socks5://*|socks5h://*) ;;
+            *) echo "::error::Proxy phải bắt đầu bằng http:// https:// socks5:// hoặc socks5h://"; exit 1 ;;
+          esac
+          printf '%s' "$YTDLP_PROXY" > proxy.txt
+          modal volume put tachnhac-data proxy.txt /proxy.txt --force
+          rm -f proxy.txt
+          echo "Đã nạp proxy."
+
       - name: Xoá dấu vết trên runner
         if: always()
-        run: rm -f cookies.txt
+        run: rm -f cookies.txt proxy.txt
 
       - name: Xong
         run: |
