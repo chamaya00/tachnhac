@@ -44,6 +44,14 @@ image = (
     )
     # Model weights tải về /models thay vì thư mục mặc định, để cache qua Volume
     .env({"AUDIO_SEPARATOR_MODEL_DIR": "/models"})
+    # yt-dlp nâng cấp ở layer riêng, cuối cùng, và force_build.
+    #
+    # Layer pip của Modal có cache: giữ nguyên spec thì bản yt-dlp bị đóng băng ở
+    # thời điểm build đầu tiên. Mà YouTube đổi cách chặn gần như hàng tuần, nên
+    # một bản yt-dlp đứng yên là hỏng vĩnh viễn — deploy lại bao nhiêu lần cũng
+    # không cứu được. Đặt cuối để layer nặng (torch, CUDA) vẫn dùng cache; riêng
+    # layer này mất thêm khoảng 20 giây mỗi lần deploy.
+    .pip_install("yt-dlp", extra_options="--upgrade", force_build=True)
 )
 
 app = modal.App(APP_NAME, image=image)
@@ -164,6 +172,18 @@ PROXY_PATHS = ("/data/proxy.txt", "/models/proxy.txt")
 # không cần PO token nên còn cơ may lọt khi không có cookie; client mặc định
 # vẫn thử đầu tiên vì khi thông thì nó cho chất lượng tốt nhất.
 PLAYER_CLIENT_CHAIN = (None, ["tv"], ["android_vr"], ["web_embedded"])
+
+# Khi CÓ cookie thì phải đi đường khác. Với tài khoản đã đăng nhập, yt-dlp mặc
+# định chọn client tv_downgraded, mà client đó đang hỏng — YouTube trả về "The
+# page needs to be reloaded". Nghịch lý: nạp cookie xong lại hỏng theo kiểu mới.
+# Thứ tự dưới đây theo đúng cách maintainer yt-dlp khuyên trong issue #17389:
+# ép player_client=default,web_embedded để né tv_downgraded.
+PLAYER_CLIENT_CHAIN_COOKIES = (
+    ["default", "web_embedded"],
+    ["web_embedded"],
+    ["tv"],
+    ["android_vr"],
+)
 
 
 def _classify_link(url: str) -> str:
@@ -292,9 +312,36 @@ def _looks_like_bot_check(message: str) -> bool:
     )
 
 
+def _looks_like_client_broken(message: str) -> bool:
+    """Lỗi do player client hỏng, không phải do bị chặn.
+
+    Tách khỏi _looks_like_bot_check vì hai thứ này cần lời giải thích khác hẳn
+    nhau, dù cách chữa giống nhau là đổi client.
+    """
+    low = message.lower()
+    return any(
+        s in low
+        for s in ("page needs to be reloaded", "playability status", "unplayable")
+    )
+
+
+def _should_try_other_client(message: str) -> bool:
+    return _looks_like_bot_check(message) or _looks_like_client_broken(message)
+
+
 def _friendly_download_error(exc: Exception, kind: str = "youtube",
                             tried: list | None = None) -> str:
     msg = str(exc)
+
+    if _looks_like_client_broken(msg):
+        note = f" Đã thử {len(tried)} cách: {', '.join(tried)}." if tried else ""
+        return (
+            "YouTube từ chối mọi cách phát mà máy chủ biết dùng." + note +
+            " Thường là do bản yt-dlp trên máy chủ đã cũ so với thay đổi mới nhất "
+            "của YouTube — deploy lại app Modal để cài bản mới nhất. "
+            "Chưa được thì tải bài về máy rồi dùng Cách 1 ở trên."
+        )
+
     if _looks_like_bot_check(msg):
         # Nói ra đã thử những gì. Không có dòng này thì lỗi lúc chuỗi client
         # chạy đủ 4 lần trông y hệt lỗi lúc backend còn bản cũ chưa có chuỗi —
@@ -538,7 +585,12 @@ def _download_with_fallbacks(job_id: str, target: str, mark, kind: str = "youtub
     Chuỗi client là thứ riêng của YouTube (extractor_args gắn khoá "youtube").
     Nguồn khác thì thử lại y hệt 4 lần, chỉ mất thời gian — nên chạy một lần.
     """
-    chain = PLAYER_CLIENT_CHAIN if kind in ("youtube", "spotify") else (None,)
+    if kind not in ("youtube", "spotify"):
+        chain = (None,)
+    elif _cookie_file():
+        chain = PLAYER_CLIENT_CHAIN_COOKIES
+    else:
+        chain = PLAYER_CLIENT_CHAIN
     if tried is None:
         tried = []
 
@@ -552,7 +604,7 @@ def _download_with_fallbacks(job_id: str, target: str, mark, kind: str = "youtub
         try:
             return _ytdlp_download(job_id, target, mark, player_client=client)
         except Exception as exc:  # noqa: BLE001
-            if not _looks_like_bot_check(str(exc)):
+            if not _should_try_other_client(str(exc)):
                 raise
             last = exc
             # Ghi vào trạng thái job để /jobs/{id} soi được sau, không chỉ nằm

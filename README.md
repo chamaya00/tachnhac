@@ -116,6 +116,21 @@ liệu PO Token của yt-dlp, ba client này không cần PO token nên còn cơ
 khi không có cookie. Lỗi không phải chặn bot (video riêng tư, bài quá dài) thì
 báo ngay, không thử lại cho phí thời gian.
 
+**Khi đã nạp cookie thì đi chuỗi khác.** Với tài khoản đã đăng nhập, yt-dlp mặc
+định chọn client `tv_downgraded`, mà client đó đang hỏng — YouTube trả về *"The
+page needs to be reloaded"*. Nghịch lý: nạp cookie xong lại hỏng theo kiểu mới.
+Nên khi thấy có file cookie, backend ép `player_client=default,web_embedded`
+theo đúng cách maintainer yt-dlp khuyên, để né `tv_downgraded`.
+
+**yt-dlp luôn được cài lại bản mới nhất mỗi lần deploy.** Layer pip của Modal có
+cache, giữ nguyên spec thì bản yt-dlp bị đóng băng ở thời điểm build đầu tiên —
+mà YouTube đổi cách chặn gần như hàng tuần, nên một bản đứng yên là hỏng vĩnh
+viễn. Vì vậy `yt-dlp` nằm ở layer cuối với `force_build=True`. Cái giá: mỗi lần
+deploy tốn thêm khoảng 20 giây; layer nặng (torch, CUDA) vẫn dùng cache.
+
+Gặp lỗi *"The page needs to be reloaded"* thì việc đầu tiên là **deploy lại**,
+để lấy bản yt-dlp mới nhất.
+
 Hết chuỗi đó mà vẫn bị chặn thì còn ba lựa chọn:
 
 | Cách | Công sức | Bền được bao lâu |
@@ -288,6 +303,7 @@ Weights tự tải lần chạy đầu rồi cache vào Volume `tachnhac-models`
 | Ô dán link hiện khung vàng "Backend đang chạy bản cũ" | Backend chưa có `/jobs/link`. Vào Actions → Deploy Modal → Run workflow, chờ build xong rồi tải lại trang. Trong lúc đó vẫn tách được bằng cách thả file. |
 | "YouTube đang chặn máy chủ…" | Cách nhanh: tải bài về máy rồi dùng Cách 1. Cách lâu dài: nạp cookie theo mục *Khi YouTube đòi "xác nhận không phải robot"*. |
 | GitHub báo `value is too large` khi lưu secret | File cookie quá 48 KB vì xuất cookie của mọi trang. Lọc lại bằng `python3 scripts/check_cookies.py cookies.txt --loc yt.txt` rồi dán `yt.txt`. |
+| `The page needs to be reloaded` | Bản yt-dlp trên máy chủ cũ hơn thay đổi mới nhất của YouTube. Deploy lại app Modal (layer yt-dlp luôn cài lại bản mới). |
 | Đã nạp cookie mà vẫn bị chặn | Mở `/diag/cookies`. `logged_in: false` = xuất lúc chưa đăng nhập. `expired: true` = nạp lại file mới. Đúng hết mà vẫn chặn thì nhiều khả năng cookie đã bị YouTube xoay vòng — xuất lại đúng trình tự cửa sổ ẩn danh ở trên. |
 | `/diag/cookies` báo `expires_in_days` rất nhỏ | Số này tính trên cookie **đăng nhập**, không phải mọi cookie. Nhỏ thật thì cookie sắp hết hạn, xuất lại. |
 | Link Spotify ra nhầm bài | Bản khớp nhất trên YouTube không phải bản gốc. Dán thẳng link YouTube của bản bạn muốn. |
