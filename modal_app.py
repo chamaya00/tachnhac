@@ -292,17 +292,24 @@ def _looks_like_bot_check(message: str) -> bool:
     )
 
 
-def _friendly_download_error(exc: Exception, kind: str = "youtube") -> str:
+def _friendly_download_error(exc: Exception, kind: str = "youtube",
+                            tried: list | None = None) -> str:
     msg = str(exc)
     if _looks_like_bot_check(msg):
+        # Nói ra đã thử những gì. Không có dòng này thì lỗi lúc chuỗi client
+        # chạy đủ 4 lần trông y hệt lỗi lúc backend còn bản cũ chưa có chuỗi —
+        # nhìn ảnh chụp màn hình không tài nào phân biệt được.
+        note = f" Đã thử {len(tried)} cách: {', '.join(tried)}." if tried else ""
         if kind == "tiktok":
             return (
-                "TikTok đang chặn máy chủ và đòi xác minh không phải robot. "
-                "Tải video về máy rồi dùng Cách 1 ở trên."
+                "TikTok đang chặn máy chủ và đòi xác minh không phải robot."
+                + note +
+                " Tải video về máy rồi dùng Cách 1 ở trên."
             )
         return (
-            "YouTube đang chặn máy chủ và đòi xác minh không phải robot. "
-            "Cách nhanh nhất: tải bài về máy rồi dùng Cách 1 ở trên. "
+            "YouTube đang chặn máy chủ và đòi xác minh không phải robot."
+            + note +
+            " Cách nhanh nhất: tải bài về máy rồi dùng Cách 1 ở trên. "
             "Cách chữa lâu dài: nạp cookie cho backend — chạy workflow "
             "\"Nạp cookie YouTube\" trên GitHub (xem README, mục Tải nhạc từ link)."
         )
@@ -504,7 +511,8 @@ def _clear_partials(job_id: str) -> None:
             pass
 
 
-def _download_with_fallbacks(job_id: str, target: str, mark, kind: str = "youtube") -> dict:
+def _download_with_fallbacks(job_id: str, target: str, mark, kind: str = "youtube",
+                             tried: list | None = None) -> dict:
     """Thử lần lượt các player client cho tới khi qua được màn chặn bot.
 
     Chỉ đổi client khi lỗi đúng là bị chặn bot; lỗi khác (video riêng tư, bài
@@ -515,6 +523,8 @@ def _download_with_fallbacks(job_id: str, target: str, mark, kind: str = "youtub
     Nguồn khác thì thử lại y hệt 4 lần, chỉ mất thời gian — nên chạy một lần.
     """
     chain = PLAYER_CLIENT_CHAIN if kind in ("youtube", "spotify") else (None,)
+    if tried is None:
+        tried = []
 
     last = None
     for attempt, client in enumerate(chain):
@@ -522,12 +532,16 @@ def _download_with_fallbacks(job_id: str, target: str, mark, kind: str = "youtub
             _clear_partials(job_id)
             mark(status="downloading", progress=0.05,
                  attempt=attempt + 1, player_client=",".join(client))
+        tried.append(",".join(client) if client else "mặc định")
         try:
             return _ytdlp_download(job_id, target, mark, player_client=client)
         except Exception as exc:  # noqa: BLE001
             if not _looks_like_bot_check(str(exc)):
                 raise
             last = exc
+            # Ghi vào trạng thái job để /jobs/{id} soi được sau, không chỉ nằm
+            # trong log Modal.
+            mark(tried_clients=list(tried))
 
     raise last if last else RuntimeError("Không tải được, không rõ nguyên nhân.")
 
@@ -547,6 +561,7 @@ def fetch_and_separate(job_id: str, url: str, model_key: str):
     # Gán trước khi vào try: nhánh báo lỗi bên dưới đọc kind, mà nếu hỏng ngay ở
     # mark() đầu tiên thì kind chưa kịp có giá trị — NameError sẽ che mất lỗi thật.
     kind = "youtube"
+    tried: list[str] = []
 
     try:
         mark(status="resolving", progress=0.02, started_at=time.time())
@@ -563,7 +578,7 @@ def fetch_and_separate(job_id: str, url: str, model_key: str):
         os.makedirs(f"/data/{job_id}", exist_ok=True)
         mark(status="downloading", progress=0.05)
 
-        info = _download_with_fallbacks(job_id, target, mark, kind)
+        info = _download_with_fallbacks(job_id, target, mark, kind, tried)
 
         path = _find_downloaded(job_id)
         size = os.path.getsize(path)
@@ -594,7 +609,7 @@ def fetch_and_separate(job_id: str, url: str, model_key: str):
         # Lỗi do link người dùng đưa vào — nói thẳng, không bọc thêm.
         mark(status="error", error=str(exc)[:400], finished_at=time.time())
     except Exception as exc:  # noqa: BLE001
-        mark(status="error", error=_friendly_download_error(exc, kind),
+        mark(status="error", error=_friendly_download_error(exc, kind, tried),
              finished_at=time.time())
         raise
 
