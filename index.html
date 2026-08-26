@@ -119,6 +119,83 @@
   }
   button.primary:disabled { opacity: 0.4; cursor: default; }
 
+  /* ---- Chọn nguồn: link hay file -------------------------------------- */
+  .tabs {
+    display: flex;
+    gap: 6px;
+    background: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    padding: 4px;
+    margin-bottom: 18px;
+  }
+  .tab {
+    flex: 1;
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    color: var(--muted);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 8px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .tab[aria-selected=true] {
+    background: var(--panel-hi);
+    color: var(--ivory);
+  }
+  .tab:disabled { opacity: 0.35; cursor: default; }
+
+  .pane[hidden] { display: none; }
+
+  /* Vùng thả file — "thả" theo đúng nghĩa đen, kéo file vào là được. */
+  .drop {
+    border: 1px dashed var(--line);
+    border-radius: 11px;
+    padding: 18px 14px;
+    text-align: center;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .drop.over {
+    border-color: var(--instrumental);
+    background: rgba(78, 205, 196, 0.07);
+  }
+  .drop .picked {
+    font-size: 13px;
+    color: var(--ivory);
+    margin-top: 10px;
+    word-break: break-all;
+  }
+  .drop .picked:empty { display: none; }
+  .drop input[type=file] { margin-top: 10px; }
+
+  .hint {
+    color: var(--muted);
+    font-size: 12px;
+    margin: 9px 0 0;
+  }
+  .hint code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ivory);
+    background: var(--ink);
+    border-radius: 4px;
+    padding: 1px 5px;
+    word-break: break-all;
+  }
+
+  /* Bài mà backend nhận ra từ link, hiện trong lúc chờ. */
+  .srcinfo {
+    display: none;
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--ivory);
+  }
+  .srcinfo b { font-weight: 600; }
+  .srcinfo span { color: var(--muted); }
+
   /* ---- Progress ------------------------------------------------------ */
   #progress { margin-top: 28px; display: none; }
   .bar {
@@ -336,14 +413,38 @@
 
   <p class="eyebrow">Tách nguồn âm thanh</p>
   <h1>Tách <em>giọng</em> khỏi <em>nhạc</em> trong một bước.</h1>
-  <p class="lede">Tải lên một bài hát, nhận về từng track riêng biệt — giọng, trống, bass, nhạc cụ. Nghe thử trực tiếp rồi tải về track bạn cần.</p>
+  <p class="lede">Dán link YouTube/Spotify hoặc thả file bài hát vào, nhận về từng track riêng biệt — giọng, trống, bass, nhạc cụ. Nghe thử trực tiếp rồi tải về track bạn cần.</p>
 
   <div class="banner" id="banner"></div>
 
   <div class="card">
-    <div class="row">
+    <div class="tabs" role="tablist" aria-label="Nguồn nhạc">
+      <button class="tab" id="tabLink" type="button" role="tab"
+              aria-selected="true" aria-controls="paneLink">Dán link</button>
+      <button class="tab" id="tabFile" type="button" role="tab"
+              aria-selected="false" aria-controls="paneFile">Tải file lên</button>
+    </div>
+
+    <div class="row pane" id="paneLink" role="tabpanel" aria-labelledby="tabLink">
+      <label class="field" for="link">Link YouTube hoặc Spotify</label>
+      <input type="url" id="link" inputmode="url"
+             placeholder="https://www.youtube.com/watch?v=…"
+             autocapitalize="off" autocorrect="off" spellcheck="false">
+      <p class="hint">
+        Máy chủ tự tải bài về rồi tách luôn. Link Spotify thì lấy tên bài và
+        nghệ sĩ để tìm đúng bản đó trên YouTube. Tối đa 12 phút mỗi bài; link
+        album hay playlist chưa nhận.
+      </p>
+    </div>
+
+    <div class="row pane" id="paneFile" role="tabpanel" aria-labelledby="tabFile" hidden>
       <label class="field" for="file">Chọn file âm thanh</label>
-      <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.flac">
+      <div class="drop" id="drop">
+        Kéo thả file vào đây, hoặc chọn từ máy
+        <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.flac">
+        <div class="picked" id="picked"></div>
+      </div>
+      <p class="hint">MP3, WAV, M4A, FLAC… tối đa 60 MB.</p>
     </div>
 
     <div class="row">
@@ -381,6 +482,7 @@
   <div id="progress">
     <div class="status" id="statusText">Đang tải lên…</div>
     <div class="bar"><i id="barFill"></i></div>
+    <div class="srcinfo" id="srcInfo"></div>
   </div>
 
   <div id="mixer">
@@ -395,7 +497,9 @@
   </div>
 
   <footer>
-    File của bạn được xoá tự động sau 24 giờ. Chỉ tải lên nội dung bạn có quyền sử dụng.
+    File của bạn được xoá tự động sau 24 giờ. Chỉ tải lên — hoặc dán link tới —
+    nội dung bạn có quyền sử dụng. Bạn tự chịu trách nhiệm về bản quyền của
+    những gì mình đưa vào đây.
   </footer>
 </div>
 
@@ -652,6 +756,23 @@ async function checkBackend() {
     if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
   } catch (e) { /* giữ nguyên danh sách tĩnh trong HTML */ }
 
+  // Backend cũ chưa có /jobs/link — khoá tab lại thay vì để bấm rồi báo lỗi.
+  try {
+    const h = await (await fetch(`${API}/health`, { cache: "no-store" })).json();
+    // Thiếu cờ = bản backend cũ hơn tính năng này, không phải "chưa bật".
+    if (!h || !h.link_import) throw new Error("off");
+    if (h && h.max_source_seconds) {
+      $("paneLink").querySelector(".hint").textContent =
+        "Máy chủ tự tải bài về rồi tách luôn. Link Spotify thì lấy tên bài và " +
+        `nghệ sĩ để tìm đúng bản đó trên YouTube. Tối đa ${Math.round(h.max_source_seconds / 60)} ` +
+        "phút mỗi bài; link album hay playlist chưa nhận.";
+    }
+  } catch (e) {
+    $("tabLink").disabled = true;
+    $("tabLink").title = "Backend chưa hỗ trợ tải từ link — deploy lại app Modal.";
+    setMode("file");
+  }
+
   $("go").disabled = false;
   return true;
 }
@@ -668,8 +789,74 @@ $("apiSave").onclick = () => {
   checkBackend().then(ok => { if (ok) resumeJob(); });
 };
 
+// ---- Chọn nguồn: link hay file -------------------------------------------
+// "link" là mặc định — đó là đường ít bước nhất cho người mới vào.
+let mode = "link";
+
+function setMode(next) {
+  if (next === "link" && $("tabLink").disabled) return;
+  mode = next;
+  $("tabLink").setAttribute("aria-selected", String(mode === "link"));
+  $("tabFile").setAttribute("aria-selected", String(mode === "file"));
+  $("paneLink").hidden = mode !== "link";
+  $("paneFile").hidden = mode !== "file";
+  $("err").textContent = "";
+}
+
+$("tabLink").onclick = () => setMode("link");
+$("tabFile").onclick = () => setMode("file");
+
+// Mũi tên trái/phải giữa hai tab — hành vi chuẩn của tablist.
+[$("tabLink"), $("tabFile")].forEach((btn, i, all) => {
+  btn.onkeydown = (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const target = all[(i + (e.key === "ArrowRight" ? 1 : all.length - 1)) % all.length];
+    if (target.disabled) return;
+    target.focus();
+    target.click();
+  };
+});
+
+function showPicked() {
+  const f = $("file").files[0];
+  $("picked").textContent = f ? `${f.name} · ${(f.size / 1048576).toFixed(1)} MB` : "";
+}
+$("file").onchange = showPicked;
+
+// Kéo thả: gán thẳng vào input để phần còn lại của luồng không phải biết
+// file đến từ đâu.
+const drop = $("drop");
+["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, (e) => {
+  e.preventDefault();
+  drop.classList.add("over");
+}));
+["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, (e) => {
+  e.preventDefault();
+  drop.classList.remove("over");
+}));
+drop.addEventListener("drop", (e) => {
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (!f) return;
+  const dt = new DataTransfer();
+  dt.items.add(f);
+  $("file").files = dt.files;
+  showPicked();
+  setMode("file");
+});
+
+// Dán link vào bất kỳ đâu trên trang khi đang ở tab link cũng ăn.
+$("link").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !$("go").disabled) $("go").click();
+});
+
+const LINK_RE = /^https?:\/\/([\w-]+\.)*(youtube\.com|youtu\.be|youtube-nocookie\.com|spotify\.com|spotify\.link)(\/|$)/i;
+
 // ---- Job flow ------------------------------------------------------------
 const STEP = {
+  resolving: "Đang đọc thông tin bài hát…",
+  downloading: "Đang tải nhạc về máy chủ…",
+  converting: "Đang chuyển sang MP3…",
   queued: "Đang xếp hàng…",
   starting: "Container GPU đã nhận việc…",
   loading_model: "Đang khởi động GPU và nạp model…",
@@ -719,6 +906,35 @@ function uploadJob(fd, onProgress) {
   });
 }
 
+// Link thì không có gì để upload — chỉ một request JSON, backend tải nền.
+async function submitLink(url, model) {
+  let res;
+  try {
+    res = await fetch(`${API}/jobs/link`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, model })
+    });
+  } catch (e) {
+    throw new Error("Không gửi được link lên backend. Kiểm tra kết nối mạng.");
+  }
+
+  let body = null;
+  try { body = await res.json(); } catch (e) {}
+
+  if (res.status === 404) {
+    throw new Error(
+      "Backend chưa có chức năng tải từ link.\n" +
+      "Deploy lại app Modal (Actions → Deploy Modal) rồi thử lại."
+    );
+  }
+  if (!res.ok || !body || !body.job_id) {
+    const d = body && body.detail;
+    throw new Error(typeof d === "string" ? d : `Backend từ chối link (HTTP ${res.status}).`);
+  }
+  return body;
+}
+
 // Job chạy ở Modal, không phụ thuộc tab này. Trước đây job_id chỉ nằm trong biến
 // cục bộ, nên hết hạn chờ (hoặc đóng tab) là mất dấu — file vẫn nằm trên Volume
 // mà trang không còn gì để mở. Ghi lại để lần sau nhặt lại được.
@@ -736,9 +952,30 @@ function recallJob() {
   try { return JSON.parse(localStorage.getItem(JOB_KEY) || "null"); } catch (e) { return null; }
 }
 
+function showSource(job) {
+  const box = $("srcInfo");
+  if (!job.title && !job.query) { box.style.display = "none"; return; }
+  box.textContent = "";
+  const b = document.createElement("b");
+  b.textContent = job.title || job.query;
+  box.appendChild(b);
+  if (job.uploader) {
+    const s = document.createElement("span");
+    s.textContent = " — " + job.uploader;
+    box.appendChild(s);
+  }
+  box.style.display = "block";
+}
+
 async function pollUntilDone(job_id, t0) {
   const deadline = t0 + MAX_WAIT_MS;
   let fails = 0;
+  // Job từ link đi qua hai worker: tải xong ở 30%, worker GPU lại bắt đầu từ 5%.
+  // Giữ thanh đi một chiều, tụt lùi trông như đang hỏng.
+  let seen = 0;
+  // Đếm từ lúc thật sự vào hàng đợi GPU, không phải từ lúc bấm nút — bước tải
+  // nhạc về nằm trước đó và không liên quan gì tới việc cấp phát GPU.
+  let queuedAt = 0;
 
   while (true) {
     let job;
@@ -759,7 +996,9 @@ async function pollUntilDone(job_id, t0) {
     // Rơi về CPU thì chậm gấp hàng chục lần — nói ra để khỏi tưởng máy treo.
     if (job.device && job.device === "cpu") label += " (CPU — rất chậm)";
     $("statusText").textContent = label;
-    $("barFill").style.width = Math.max(6, (job.progress || 0) * 100) + "%";
+    seen = Math.max(seen, job.progress || 0);
+    $("barFill").style.width = Math.max(6, seen * 100) + "%";
+    showSource(job);
 
     if (job.status === "error") throw new Error(job.error || "Tách thất bại.");
     if (job.status === "done") {
@@ -769,7 +1008,8 @@ async function pollUntilDone(job_id, t0) {
 
     // Đứng mãi ở "queued" là chuyện khác hẳn với việc tách lâu: container chưa
     // từng khởi động. Tách bạch hai ca này để khỏi phải chờ hết 20 phút.
-    if (job.status === "queued" && Date.now() - t0 > 4 * 60 * 1000) {
+    if (job.status === "queued" && !queuedAt) queuedAt = Date.now();
+    if (job.status === "queued" && queuedAt && Date.now() - queuedAt > 4 * 60 * 1000) {
       throw new Error(
         "Job nằm ở hàng đợi hơn 4 phút mà container GPU chưa khởi động.\n" +
         `Thường là Modal chưa cấp phát được GPU. Mở ${API}/diag để kiểm tra.`
@@ -796,32 +1036,52 @@ async function finishJob(job_id, job) {
 }
 
 $("go").onclick = async () => {
+  const model = $("model").value;
   const file = $("file").files[0];
+  const url = $("link").value.trim();
   $("err").textContent = "";
 
-  if (!file) { $("err").textContent = "Chọn một file âm thanh."; return; }
-  if (file.size > 60 * 1024 * 1024) { $("err").textContent = "File quá lớn — tối đa 60 MB."; return; }
+  // Kiểm tra trước khi động vào giao diện, để lỗi nhập liệu không làm nhấp nháy
+  // thanh tiến độ rồi biến mất.
+  if (mode === "link") {
+    if (!url) { $("err").textContent = "Dán link YouTube hoặc Spotify vào ô trên."; return; }
+    if (!LINK_RE.test(url)) {
+      $("err").textContent = "Chỉ nhận link YouTube hoặc Spotify.\nVí dụ: https://www.youtube.com/watch?v=…";
+      return;
+    }
+  } else {
+    if (!file) { $("err").textContent = "Chọn một file âm thanh."; return; }
+    if (file.size > 60 * 1024 * 1024) { $("err").textContent = "File quá lớn — tối đa 60 MB."; return; }
+  }
 
   $("go").disabled = true;
   $("resume").style.display = "none";
   $("mixer").style.display = "none";
+  $("srcInfo").style.display = "none";
   if (playing) pause(false);
   $("progress").style.display = "block";
-  $("statusText").textContent = "Đang tải lên…";
+  $("statusText").textContent = mode === "link" ? STEP.resolving : "Đang tải lên…";
   $("barFill").style.width = "6%";
 
   try {
-    const fd = new FormData();
-    fd.append("file", file);
-    fd.append("model", $("model").value);
+    let job_id, label;
 
-    const { job_id } = await uploadJob(fd, (frac) => {
-      $("barFill").style.width = (6 + frac * 24) + "%";
-      $("statusText").textContent = `Đang tải lên… ${Math.round(frac * 100)}%`;
-    });
+    if (mode === "link") {
+      ({ job_id } = await submitLink(url, model));
+      label = url;
+    } else {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("model", model);
+      ({ job_id } = await uploadJob(fd, (frac) => {
+        $("barFill").style.width = (6 + frac * 24) + "%";
+        $("statusText").textContent = `Đang tải lên… ${Math.round(frac * 100)}%`;
+      }));
+      label = file.name;
+      $("statusText").textContent = STEP.queued;
+    }
 
-    rememberJob(job_id, file.name);
-    $("statusText").textContent = STEP.queued;
+    rememberJob(job_id, label);
     const job = await pollUntilDone(job_id, Date.now());
     await finishJob(job_id, job);
   } catch (e) {

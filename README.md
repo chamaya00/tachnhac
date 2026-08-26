@@ -6,15 +6,24 @@ Web app tách giọng hát khỏi nhạc nền. Backend chạy GPU serverless tr
 
 ```
 index.html (Vercel, tĩnh)
-   │  POST /jobs  (multipart)
-   ▼
-Modal ASGI endpoint ──spawn──▶ separate()  [GPU A10G]
-   │                              │
-   │  GET /jobs/{id}              │ audio-separator
-   │  GET /jobs/{id}/stems/{name} │ BS-Roformer / HTDemucs
-   ▼                              ▼
-modal.Dict (trạng thái)     modal.Volume (weights + stem)
+   │
+   ├─ POST /jobs        (multipart — thả file)
+   │                         └──spawn──────────────┐
+   │                                               │
+   ├─ POST /jobs/link   (JSON — dán link)          │
+   │                         └──spawn──▶ fetch_and_separate()  [CPU]
+   │                                        │ yt-dlp + ffmpeg  │
+   │                                        └──spawn───────────┤
+   ▼                                                           ▼
+Modal ASGI endpoint                              separate()  [GPU A10G]
+   │  GET /jobs/{id}                                   │ audio-separator
+   │  GET /jobs/{id}/stems/{name}                      │ BS-Roformer / HTDemucs
+   ▼                                                   ▼
+modal.Dict (trạng thái)                     modal.Volume (weights + stem)
 ```
+
+Việc tải nhạc nằm ở container CPU riêng, không phải trong `separate()`: tải một
+bài mất 10–60 giây, giữ GPU A10G rảnh rỗi trong quãng đó là đốt tiền vô ích.
 
 Không cần S3/R2 cho bản đầu — Modal Volume làm luôn phần lưu trữ tạm.
 
@@ -56,6 +65,48 @@ thật. **Không khuyến khích**: rewrite của Vercel giới hạn dung lư�
 file nhạc vài chục MB sẽ bị chặn với lỗi HTTP 413. Gửi thẳng tới Modal thì không
 vướng (backend đã bật CORS `*`).
 
+## Tải nhạc từ link
+
+Trang có hai đường vào, chọn bằng tab ở đầu thẻ:
+
+1. **Dán link** — dán URL YouTube hoặc Spotify, máy chủ tự tải bài về rồi tách.
+2. **Tải file lên** — chọn hoặc kéo thả file từ máy, như trước giờ.
+
+| Nguồn | Cách xử lý |
+|---|---|
+| YouTube (`youtube.com`, `youtu.be`, `music.youtube.com`) | yt-dlp tải thẳng luồng audio tốt nhất, ffmpeg chuyển sang MP3 192 kbps. |
+| Spotify (`open.spotify.com/track/…`, `spotify.link`) | Đọc tên bài + nghệ sĩ từ metadata công khai, rồi tìm đúng bài đó trên YouTube. |
+
+Spotify không phát audio ra ngoài trình phát của họ nên không có đường tải thẳng
+— cách trên cũng là cách `spotdl` vẫn làm. Hệ quả: bản lấy về là bản trên
+YouTube, có thể là live, cover hay remaster khác với bản trong playlist. Nghe thử
+ở mixer trước khi tải track về.
+
+**Giới hạn**
+
+- Tối đa 12 phút mỗi bài (`MAX_SOURCE_SECONDS` trong `modal_app.py`). Dài hơn thì
+  cắt ngắn rồi tải file lên.
+- Chỉ nhận link **một bài**. Album, playlist, podcast đều bị từ chối ngay.
+- Link ngoài hai nguồn trên bị chặn ở cả frontend lẫn backend.
+
+### Khi YouTube đòi "xác nhận không phải robot"
+
+YouTube chặn IP trung tâm dữ liệu khá gắt, nên yt-dlp chạy trên Modal có lúc bị
+đòi xác minh. Backend tự thử lại một lần với `player_client=tv` — không ăn thì
+báo lỗi kèm hướng dẫn. Cách chữa dứt điểm là nạp cookie:
+
+1. Dùng một tiện ích trình duyệt xuất cookie của `youtube.com` ra định dạng
+   Netscape (`cookies.txt`). Nên dùng tài khoản phụ.
+2. Đẩy lên volume: `modal volume put tachnhac-data cookies.txt /cookies.txt`
+
+Backend tự nhận file ở `/data/cookies.txt` hoặc `/models/cookies.txt`. Không có
+file thì bỏ qua, không phải lỗi.
+
+**Bản quyền**: chỉ dán link tới nội dung bạn có quyền sử dụng. Việc tải nhạc có
+bản quyền về thường vi phạm điều khoản dịch vụ của YouTube và có thể vi phạm luật
+bản quyền nơi bạn ở — người vận hành trang và người dán link tự chịu trách nhiệm.
+Trước khi mở cho người ngoài, xem lại mục "Việc còn lại" ở cuối README.
+
 ## Mô hình
 
 | Key | Model | Track ra | Ghi chú |
@@ -82,10 +133,16 @@ Weights tự tải lần chạy đầu rồi cache vào Volume `tachnhac-models`
 | Kẹt ở "Đang xếp hàng…" | Container GPU chưa khởi động xong (lần đầu ~1–2 phút do phải tải weights), hoặc worker chết. Xem log trong dashboard Modal. |
 | "Quá thời gian chờ" | Job treo — kiểm tra log `separate` trên Modal. |
 | Báo lỗi tên model | Weights chưa tải được. Xoá Volume `tachnhac-models` rồi chạy lại. |
+| Tab "Dán link" bị mờ, không bấm được | Backend đang chạy bản cũ chưa có `/jobs/link`. Deploy lại app Modal. |
+| "YouTube đang chặn máy chủ…" | Bị chặn bot. Nạp cookie theo mục *Tải nhạc từ link*, hoặc tải file về máy rồi dùng tab thả file. |
+| Link Spotify ra nhầm bài | Bản khớp nhất trên YouTube không phải bản gốc. Dán thẳng link YouTube của bản bạn muốn. |
+| "Bài dài … quá mốc 12 phút" | Cắt ngắn file rồi tải lên, hoặc nới `MAX_SOURCE_SECONDS` trong `modal_app.py`. |
 
 ## Việc còn lại trước khi mở cho người ngoài
 
 - [ ] Siết `allow_origins` về đúng domain thay vì `*`
-- [ ] Rate limit theo IP ở endpoint `/jobs`
-- [ ] Trang điều khoản: người dùng tự chịu trách nhiệm về bản quyền nội dung tải lên
+- [ ] Rate limit theo IP ở endpoint `/jobs` và `/jobs/link` — endpoint link tốn
+      băng thông ra ngoài, dễ bị lạm dụng thành máy tải nhạc chùa
+- [ ] Trang điều khoản: người dùng tự chịu trách nhiệm về bản quyền nội dung tải
+      lên **và nội dung dán link tới**
 - [ ] Chunk file dài trên 10 phút (hạ `segment_size` nếu gặp OOM)

@@ -5,11 +5,16 @@ Deploy:  modal deploy modal_app.py
 Endpoint sẽ có dạng: https://<user>--tachnhac-api.modal.run
 """
 
+import glob
+import json
 import os
 import re
 import shutil
 import time
+import urllib.parse
+import urllib.request
 import uuid
+from html import unescape
 
 import modal
 
@@ -33,6 +38,9 @@ image = (
         "audio-separator[gpu]>=0.28,<1.0",
         "fastapi[standard]",
         "python-multipart",
+        # Nguồn nhạc từ link. Ghim mốc tối thiểu chứ không ghim chặt: YouTube đổi
+        # cách chống bot liên tục, bản yt-dlp cũ vài tháng là hỏng.
+        "yt-dlp>=2025.1.15",
     )
     # Model weights tải về /models thay vì thư mục mặc định, để cache qua Volume
     .env({"AUDIO_SEPARATOR_MODEL_DIR": "/models"})
@@ -81,9 +89,352 @@ def _input_path(job_id: str, ext: str) -> str:
     return f"/data/{job_id}/input{ext}"
 
 
+def _safe_download_name(name: str | None) -> str:
+    """Gọt tên bài trước khi ném vào header Content-Disposition.
+
+    Tên đến từ tiêu đề YouTube hoặc tên file người dùng đặt — có thể chứa dấu
+    nháy kép (làm vỡ header), dấu / (thành đường dẫn), hay xuống dòng. Giữ lại
+    dấu tiếng Việt: Starlette tự mã hoá phần non-ASCII sang filename*=UTF-8.
+    """
+    base = os.path.splitext(name or "")[0]
+    base = re.sub(r'[\\/:*?"<>|\r\n\t]', " ", base)
+    base = re.sub(r"\s+", " ", base).strip(" .")
+    return base[:80] or "audio"
+
+
 def _safe_ext(filename: str | None) -> str:
     ext = os.path.splitext(filename or "")[1].lower()
     return ext if ext in ALLOWED_EXTS else DEFAULT_EXT
+
+
+# ---------------------------------------------------------------------------
+# Nguồn nhạc từ link
+# ---------------------------------------------------------------------------
+YT_HOSTS = {
+    "youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com",
+    "youtu.be", "www.youtu.be", "youtube-nocookie.com", "www.youtube-nocookie.com",
+}
+SPOTIFY_HOSTS = {"open.spotify.com", "play.spotify.com", "spotify.link"}
+
+# Bài dài hơn mốc này gần như chắc chắn không phải một ca khúc: mix DJ, podcast,
+# livestream vài tiếng. Chặn từ đầu, đừng để GPU chạy 20 phút rồi mới vỡ.
+MAX_SOURCE_SECONDS = 12 * 60
+MAX_DOWNLOAD_BYTES = 80 * 1024 * 1024
+
+BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
+# Đặt file cookie Netscape ở một trong hai chỗ này để vượt màn "xác nhận không
+# phải robot" của YouTube (xem README). Không có thì bỏ qua, không phải lỗi.
+COOKIE_PATHS = ("/data/cookies.txt", "/models/cookies.txt")
+
+
+def _classify_link(url: str) -> str:
+    """Trả về "youtube" | "spotify", hoặc ném ValueError nếu không nhận."""
+    parts = urllib.parse.urlparse(url)
+    if parts.scheme not in ("http", "https"):
+        raise ValueError("Link phải bắt đầu bằng http:// hoặc https://")
+
+    host = (parts.hostname or "").lower()
+    if host in YT_HOSTS:
+        return "youtube"
+    if host in SPOTIFY_HOSTS:
+        return "spotify"
+    raise ValueError("Hiện chỉ nhận link YouTube hoặc Spotify.")
+
+
+def _http_get(url: str, timeout: int = 15) -> str:
+    req = urllib.request.Request(
+        url, headers={"User-Agent": BROWSER_UA, "Accept-Language": "en-US,en;q=0.9"}
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8", "replace")
+
+
+def _follow_redirect(url: str, timeout: int = 15) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": BROWSER_UA})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.geturl()
+
+
+def _dig(data, *keys):
+    for key in keys:
+        if not isinstance(data, dict):
+            return None
+        data = data.get(key)
+    return data
+
+
+def _spotify_query(url: str) -> str:
+    """Đọc tên bài + nghệ sĩ từ trang công khai của Spotify.
+
+    Spotify không phát audio ra ngoài trình phát của họ, nên không có đường nào
+    tải thẳng từ đó — cũng không tìm cách đó ở đây. Ta chỉ lấy phần metadata
+    công khai (đúng thứ trình duyệt nào cũng đọc được để hiện preview link) rồi
+    dùng nó tìm lại đúng bài trên YouTube. Đây cũng là cách spotdl vẫn làm.
+    """
+    if (urllib.parse.urlparse(url).hostname or "").lower() == "spotify.link":
+        url = _follow_redirect(url)
+
+    match = re.search(
+        r"open\.spotify\.com/(?:intl-[a-z]{2}/)?([a-z]+)/([A-Za-z0-9]+)", url
+    )
+    if not match:
+        raise ValueError("Link Spotify không đọc được. Dùng link dạng .../track/...")
+
+    kind, sid = match.group(1), match.group(2)
+    if kind != "track":
+        raise ValueError(
+            "Mới nhận link một bài hát (.../track/...). "
+            "Link album, playlist hay podcast thì chưa."
+        )
+
+    title = artist = ""
+
+    # 1. Trang embed — đầy đủ nhất, có cả danh sách nghệ sĩ.
+    try:
+        html = _http_get(f"https://open.spotify.com/embed/track/{sid}")
+        blob = re.search(
+            r'<script[^>]+id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S
+        )
+        if blob:
+            entity = _dig(
+                json.loads(blob.group(1)),
+                "props", "pageProps", "state", "data", "entity",
+            ) or {}
+            title = entity.get("name") or ""
+            artist = ", ".join(
+                a.get("name", "") for a in (entity.get("artists") or []) if a.get("name")
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 2. oEmbed — API công khai, ổn định, nhưng chỉ có tên bài.
+    if not title:
+        try:
+            data = json.loads(
+                _http_get(
+                    "https://open.spotify.com/oembed?url="
+                    + urllib.parse.quote(f"https://open.spotify.com/track/{sid}", safe="")
+                )
+            )
+            title = data.get("title") or ""
+        except Exception:  # noqa: BLE001
+            pass
+
+    # 3. Thẻ og: trên trang thường — og:description dạng "Nghệ sĩ · Song · 1987".
+    if not title or not artist:
+        try:
+            html = _http_get(f"https://open.spotify.com/track/{sid}")
+            if not title:
+                tag = re.search(r'<meta property="og:title" content="([^"]*)"', html)
+                if tag:
+                    title = unescape(tag.group(1))
+            if not artist:
+                tag = re.search(r'<meta property="og:description" content="([^"]*)"', html)
+                if tag:
+                    artist = unescape(tag.group(1)).split("\u00b7")[0].strip()
+        except Exception:  # noqa: BLE001
+            pass
+
+    if not title:
+        raise ValueError(
+            "Không đọc được tên bài từ link Spotify. "
+            "Thử dán link YouTube của bài đó, hoặc tải file lên."
+        )
+    return f"{artist} {title}".strip()
+
+
+def _looks_like_bot_check(message: str) -> bool:
+    low = message.lower()
+    return any(
+        s in low
+        for s in ("sign in to confirm", "not a bot", "captcha", "cookies", "http error 429")
+    )
+
+
+def _friendly_download_error(exc: Exception) -> str:
+    msg = str(exc)
+    if _looks_like_bot_check(msg):
+        return (
+            "YouTube đang chặn máy chủ và đòi xác minh không phải robot. "
+            "Tải file về máy rồi dùng ô \"Tải file lên\", hoặc nạp cookie cho "
+            "backend (xem README, mục Tải nhạc từ link)."
+        )
+    low = msg.lower()
+    if "private" in low or "members-only" in low:
+        return "Video này ở chế độ riêng tư hoặc chỉ dành cho thành viên."
+    if "unavailable" in low or "removed" in low:
+        return "Video không còn tồn tại hoặc bị chặn ở khu vực của máy chủ."
+    if "age" in low and "restrict" in low:
+        return "Video bị giới hạn độ tuổi nên máy chủ không tải được."
+    return f"Không tải được nhạc từ link: {msg}"[:400]
+
+
+def _cookie_file() -> str | None:
+    for path in COOKIE_PATHS:
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def _ytdlp_download(job_id: str, target: str, mark, player_client=None) -> dict:
+    """Tải audio về /data/<job_id>/input.mp3, trả về info dict của yt-dlp.
+
+    `target` là URL YouTube, hoặc chuỗi "ytsearch1:..." khi nguồn là Spotify.
+    """
+    import yt_dlp
+
+    last_tick = [0.0]
+
+    def hook(d):
+        if d.get("status") == "downloading":
+            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+            done = d.get("downloaded_bytes") or 0
+            # modal.Dict là network call — đừng ghi mỗi chunk.
+            if total and time.time() - last_tick[0] > 1.0:
+                last_tick[0] = time.time()
+                mark(progress=round(0.05 + 0.20 * min(1.0, done / total), 3))
+        elif d.get("status") == "finished":
+            mark(status="converting", progress=0.27)
+
+    opts = {
+        "format": "bestaudio/best",
+        "outtmpl": f"/data/{job_id}/input.%(ext)s",
+        "noplaylist": True,      # link kèm &list= thì chỉ lấy đúng video đó
+        "playlist_items": "1",
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "retries": 3,
+        "fragment_retries": 3,
+        "socket_timeout": 30,
+        "max_filesize": MAX_DOWNLOAD_BYTES,
+        "progress_hooks": [hook],
+        "postprocessors": [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }
+        ],
+    }
+
+    cookies = _cookie_file()
+    if cookies:
+        opts["cookiefile"] = cookies
+    if player_client:
+        opts["extractor_args"] = {"youtube": {"player_client": list(player_client)}}
+
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(target, download=False)
+
+        # ytsearch: và link playlist đều trả về kiểu "playlist" — lấy mục đầu.
+        if info.get("_type") == "playlist" or "entries" in info:
+            entries = [e for e in (info.get("entries") or []) if e]
+            if not entries:
+                raise RuntimeError("Không tìm thấy bài nào khớp với link này.")
+            info = entries[0]
+
+        duration = info.get("duration") or 0
+        if duration and duration > MAX_SOURCE_SECONDS:
+            raise RuntimeError(
+                f"Bài dài {int(duration // 60)} phút, quá mốc "
+                f"{MAX_SOURCE_SECONDS // 60} phút. Cắt ngắn rồi tải file lên."
+            )
+
+        mark(
+            title=info.get("title") or "",
+            uploader=info.get("uploader") or info.get("channel") or "",
+            duration=duration or None,
+            webpage_url=info.get("webpage_url") or target,
+        )
+
+        ydl.extract_info(info.get("webpage_url") or target, download=True)
+
+    return info
+
+
+def _find_downloaded(job_id: str) -> str:
+    """Tìm file yt-dlp vừa ghi ra. Ưu tiên .mp3 do postprocessor sinh."""
+    found = [
+        p for p in glob.glob(f"/data/{job_id}/input.*") if os.path.isfile(p)
+    ]
+    if not found:
+        raise RuntimeError("Tải xong nhưng không thấy file audio nào trên đĩa.")
+    found.sort(key=lambda p: (os.path.splitext(p)[1].lower() != ".mp3", p))
+    return found[0]
+
+
+@app.function(volumes={"/data": data_vol, "/models": models_vol}, timeout=1200, retries=0)
+def fetch_and_separate(job_id: str, url: str, model_key: str):
+    """Tải nhạc từ link rồi chuyển tiếp sang worker GPU.
+
+    Tách khỏi separate() để không giữ GPU trong lúc chờ mạng — tải một bài mất
+    10–60 giây, trả tiền A10G cho quãng đó là phí.
+    """
+    def mark(**kw):
+        job = jobs.get(job_id, {})
+        job.update(kw)
+        jobs[job_id] = job
+
+    try:
+        mark(status="resolving", progress=0.02, started_at=time.time())
+
+        kind = _classify_link(url)
+        if kind == "spotify":
+            query = _spotify_query(url)
+            mark(query=query)
+            target = f"ytsearch1:{query}"
+        else:
+            target = url
+
+        data_vol.reload()
+        os.makedirs(f"/data/{job_id}", exist_ok=True)
+        mark(status="downloading", progress=0.05)
+
+        try:
+            info = _ytdlp_download(job_id, target, mark)
+        except Exception as first:  # noqa: BLE001
+            # Client mặc định bị chặn thì thử "tv" — hay lọt hơn khi không cookie.
+            if not _looks_like_bot_check(str(first)):
+                raise
+            mark(status="downloading", progress=0.05)
+            info = _ytdlp_download(job_id, target, mark, player_client=["tv", "web"])
+
+        path = _find_downloaded(job_id)
+        size = os.path.getsize(path)
+        if size == 0:
+            raise RuntimeError("File tải về rỗng.")
+
+        ext = os.path.splitext(path)[1].lower()
+        if ext not in ALLOWED_EXTS:
+            raise RuntimeError(f"Định dạng tải về không dùng được: {ext}")
+
+        # separate() đọc theo _input_path(job_id, ext) nên tên phải khớp đúng.
+        expected = _input_path(job_id, ext)
+        if path != expected:
+            shutil.move(path, expected)
+
+        data_vol.commit()
+
+        title = info.get("title") or "audio"
+        mark(
+            status="queued",
+            progress=0.30,
+            ext=ext,
+            filename=f"{title}{ext}",
+            downloaded_bytes=size,
+        )
+        separate.spawn(job_id, model_key, ext)
+    except ValueError as exc:
+        # Lỗi do link người dùng đưa vào — nói thẳng, không bọc thêm.
+        mark(status="error", error=str(exc)[:400], finished_at=time.time())
+    except Exception as exc:  # noqa: BLE001
+        mark(status="error", error=_friendly_download_error(exc), finished_at=time.time())
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +622,7 @@ def gpu_probe():
 @app.function(volumes={"/data": data_vol}, timeout=600)
 @modal.asgi_app()
 def api():
-    from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+    from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse
 
@@ -286,7 +637,15 @@ def api():
 
     @web.get("/health")
     def health():
-        return {"ok": True, "app": APP_NAME, "models": list(MODELS)}
+        return {
+            "ok": True,
+            "app": APP_NAME,
+            "models": list(MODELS),
+            # Frontend dùng cờ này để ẩn tab "Dán link" nếu backend còn bản cũ.
+            "link_import": True,
+            "link_sources": ["youtube", "spotify"],
+            "max_source_seconds": MAX_SOURCE_SECONDS,
+        }
 
     @web.get("/diag")
     def diag():
@@ -340,6 +699,45 @@ def api():
         separate.spawn(job_id, model, ext)
         return {"job_id": job_id}
 
+    @web.post("/jobs/link")
+    def create_link_job(payload: dict = Body(...)):
+        """Nhận link YouTube/Spotify, trả job_id ngay rồi tải nền.
+
+        Không tải trong request này: một bài mất 10–60 giây, giữ kết nối HTTP
+        lâu vậy là cầm chắc timeout ở proxy hoặc trên 4G.
+        """
+        url = str(payload.get("url") or "").strip()
+        model = str(payload.get("model") or "roformer")
+
+        if model not in MODELS:
+            raise HTTPException(400, f"Model không hợp lệ: {model}")
+        if not url:
+            raise HTTPException(400, "Chưa dán link.")
+        if len(url) > 2000:
+            raise HTTPException(400, "Link quá dài.")
+
+        try:
+            kind = _classify_link(url)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+        job_id = uuid.uuid4().hex
+        os.makedirs(f"/data/{job_id}", exist_ok=True)
+        data_vol.commit()
+
+        jobs[job_id] = {
+            "status": "resolving",
+            "progress": 0.0,
+            "model": model,
+            "source": kind,
+            "source_url": url,
+            "filename": None,
+            "ext": DEFAULT_EXT,
+            "created_at": time.time(),
+        }
+        fetch_and_separate.spawn(job_id, url, model)
+        return {"job_id": job_id, "source": kind}
+
     @web.get("/jobs/{job_id}")
     def job_status(job_id: str):
         job = jobs.get(job_id)
@@ -364,7 +762,7 @@ def api():
         if not os.path.exists(path):
             raise HTTPException(410, "File đã bị xoá.")
 
-        base = os.path.splitext(job.get("filename") or "audio")[0]
+        base = _safe_download_name(job.get("filename"))
         ext = os.path.splitext(filename)[1]
         return FileResponse(
             path,
