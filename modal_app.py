@@ -84,6 +84,25 @@ JOB_TTL_SECONDS = 24 * 3600
 ALLOWED_EXTS = {".mp3", ".wav", ".m4a", ".mp4", ".flac", ".ogg", ".opus", ".aac", ".wma"}
 DEFAULT_EXT = ".mp3"
 
+# Stem luôn ra MP3, nhưng bản gốc thì giữ nguyên định dạng người dùng đưa vào —
+# trả nhầm "audio/mpeg" cho một file flac là nói dối trình duyệt, có máy sẽ mở
+# trong trình phát rồi phát lỗi thay vì lưu về.
+MEDIA_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".mp4": "audio/mp4",
+    ".flac": "audio/flac",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/opus",
+    ".aac": "audio/aac",
+    ".wma": "audio/x-ms-wma",
+}
+
+
+def _media_type(ext: str) -> str:
+    return MEDIA_TYPES.get((ext or "").lower(), "application/octet-stream")
+
 
 def _input_path(job_id: str, ext: str) -> str:
     return f"/data/{job_id}/input{ext}"
@@ -665,6 +684,10 @@ def separate(job_id: str, model_key: str, ext: str = DEFAULT_EXT):
             status="done",
             progress=1.0,
             stems=list(produced.keys()),
+            # Cờ để frontend biết backend này có /jobs/{id}/source. Job cũ (hoặc
+            # backend cũ) thiếu khoá này thì nút tải bản gốc ẩn đi, thay vì hiện
+            # ra rồi bấm vào ăn 404.
+            source_ext=ext,
             files=produced,
             seconds=round(time.time() - t0, 1),
             finished_at=time.time(),
@@ -915,9 +938,34 @@ def api():
         ext = os.path.splitext(filename)[1]
         return FileResponse(
             path,
-            media_type="audio/mpeg" if ext == ".mp3" else "audio/wav",
+            media_type=_media_type(ext),
             filename=f"{base} - {stem}{ext}",
         )
+
+    @web.get("/jobs/{job_id}/source")
+    def download_source(job_id: str):
+        """Trả về nguyên bài chưa tách — cùng file mà worker GPU đã đọc vào.
+
+        Dùng chung cho cả hai cách tách: file tự tải lên và bài máy chủ tải từ
+        link đều nằm ở một chỗ. Với cách 2 đây là đường duy nhất lấy được bản
+        gốc, vì bài chưa từng đi qua máy người dùng.
+        """
+        job = jobs.get(job_id)
+        if job is None:
+            raise HTTPException(404, "Không tìm thấy job.")
+
+        ext = job.get("ext") or DEFAULT_EXT
+        data_vol.reload()
+        path = _input_path(job_id, ext)
+        if not os.path.exists(path):
+            # Job từ link chưa tải xong thì chưa có gì để trả — khác hẳn với
+            # file đã bị dọn sau 24 giờ, nên tách hai mã lỗi.
+            if job.get("status") in ("resolving", "downloading"):
+                raise HTTPException(409, "Máy chủ chưa tải xong bản gốc.")
+            raise HTTPException(410, "File đã bị xoá.")
+
+        base = _safe_download_name(job.get("filename"))
+        return FileResponse(path, media_type=_media_type(ext), filename=f"{base}{ext}")
 
     return web
 
