@@ -18,6 +18,7 @@ index.html (Vercel, tĩnh)
 Modal ASGI endpoint                              separate()  [GPU A10G]
    │  GET /jobs/{id}                                   │ audio-separator
    │  GET /jobs/{id}/stems/{name}                      │ BS-Roformer / HTDemucs
+   │  GET /jobs/{id}/source   (bản gốc chưa tách)      │
    ▼                                                   ▼
 modal.Dict (trạng thái)                     modal.Volume (weights + stem)
 ```
@@ -211,6 +212,23 @@ bản quyền về thường vi phạm điều khoản dịch vụ của YouTube
 bản quyền nơi bạn ở — người vận hành trang và người dán link tự chịu trách nhiệm.
 Trước khi mở cho người ngoài, xem lại mục "Việc còn lại" ở cuối README.
 
+## Tải bản gốc
+
+Tách xong, ngay trên mixer có thêm hàng **Bản gốc**: tải về nguyên bài chưa
+tách — vocal và nhạc nền còn nằm chung một file. Dùng được cho cả hai cách tách:
+
+- **Cách 1 (thả file)** — trả lại đúng file bạn đưa lên, nguyên định dạng gốc
+  (mp3, m4a, flac…), không phải bản mp3 do máy tách xuất ra.
+- **Cách 2 (dán link)** — đây là đường duy nhất lấy được bản gốc, vì bài do máy
+  chủ tải về, chưa từng đi qua máy bạn. Tên file lấy theo tiêu đề bài hát.
+
+Backend phục vụ từ `GET /jobs/{id}/source`, đọc thẳng file input mà worker GPU
+đã dùng — không tách thêm, không tốn thêm chỗ chứa. File vẫn bị dọn cùng job sau
+24 giờ.
+
+Nút chỉ hiện khi job có khoá `source_ext`. Backend bản cũ không trả khoá này nên
+nút ẩn hẳn, thay vì hiện ra rồi bấm vào ăn 404.
+
 ## Mô hình
 
 | Key | Model | Track ra | Ghi chú |
@@ -241,6 +259,7 @@ Weights tự tải lần chạy đầu rồi cache vào Volume `tachnhac-models`
 | "YouTube đang chặn máy chủ…" | Cách nhanh: tải bài về máy rồi dùng Cách 1. Cách lâu dài: nạp cookie theo mục *Khi YouTube đòi "xác nhận không phải robot"*. |
 | Đã nạp cookie mà vẫn bị chặn | Mở `/diag/cookies`. `logged_in: false` = xuất lúc chưa đăng nhập. `expired: true` = nạp lại file mới. Đúng hết mà vẫn chặn thì IP của Modal đang bị siết, đành dùng Cách 1. |
 | Link Spotify ra nhầm bài | Bản khớp nhất trên YouTube không phải bản gốc. Dán thẳng link YouTube của bản bạn muốn. |
+| Không thấy hàng "Bản gốc" trong mixer | Job này chạy trên backend bản cũ (chưa có `/jobs/{id}/source`). Deploy lại qua Actions → Deploy Modal rồi tách lại — job cũ không có bản gốc để lấy. |
 | "Bài dài … quá mốc 12 phút" | Cắt ngắn file rồi tải lên, hoặc nới `MAX_SOURCE_SECONDS` trong `modal_app.py`. |
 
 ## Việc còn lại trước khi mở cho người ngoài

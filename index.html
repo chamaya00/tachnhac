@@ -264,6 +264,37 @@
     justify-content: space-between;
   }
 
+  /* Hàng bản gốc. Cố tình không phải một strip trong mixer: bản gốc đã chứa
+     sẵn mọi stem, bật lên nghe cùng là chồng tiếng gấp đôi. Ở đây chỉ để tải. */
+  .srcrow {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    border: 1px dashed var(--line);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    background: var(--panel);
+  }
+  .srcrow-name {
+    font-weight: 800;
+    font-size: 14px;
+    letter-spacing: -0.01em;
+    flex: 1;
+    min-width: 0;
+  }
+  .srcrow-name em {
+    display: block;
+    font-style: normal;
+    font-weight: 500;
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .strip {
     border: 1px solid var(--line);
     border-left: 3px solid var(--c);
@@ -507,6 +538,13 @@
         <div class="time"><span id="tNow">0:00</span><span id="tEnd">0:00</span></div>
       </div>
     </div>
+    <div class="srcrow" id="srcRow">
+      <span class="srcrow-name">
+        Bản gốc
+        <em id="srcRowNote">Cả bài, chưa tách — vocal + nhạc nền</em>
+      </span>
+      <a class="dl" id="srcDl" href="#" download>Tải</a>
+    </div>
     <div id="strips"></div>
   </div>
 
@@ -678,9 +716,25 @@ function buildMixer(jobId, stems) {
   });
 }
 
-async function loadStems(jobId, stems) {
+// Bản gốc chỉ hiện khi backend nói rõ là có: job cũ — hoặc backend chưa deploy
+// bản này — không có source_ext, khi đó nút bấm vào chỉ ăn 404.
+function showSourceRow(jobId, job) {
+  const row = $("srcRow");
+  if (!job || !job.source_ext) { row.style.display = "none"; return; }
+
+  $("srcDl").href = `${API}/jobs/${encodeURIComponent(jobId)}/source`;
+  const name = (job.filename || "").trim();
+  $("srcRowNote").textContent = name
+    ? `${name} — cả bài, chưa tách`
+    : "Cả bài, chưa tách — vocal + nhạc nền";
+  row.style.display = "flex";
+}
+
+async function loadStems(jobId, job) {
+  const stems = job.stems || [];
   ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
   buildMixer(jobId, stems);
+  showSourceRow(jobId, job);
 
   await Promise.all(tracks.map(async t => {
     const url = `${API}/jobs/${jobId}/stems/${encodeURIComponent(t.name)}`;
@@ -1030,7 +1084,7 @@ async function finishJob(job_id, job) {
   $("statusText").textContent =
     `Xong trong ${job.seconds} giây${job.device ? " trên " + job.device : ""}` +
     " — nhấn phát để nghe thử";
-  await loadStems(job_id, job.stems);
+  await loadStems(job_id, job);
 }
 
 async function startJob(kind) {
