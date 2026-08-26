@@ -115,6 +115,12 @@ YT_HOSTS = {
     "youtu.be", "www.youtu.be", "youtube-nocookie.com", "www.youtube-nocookie.com",
 }
 SPOTIFY_HOSTS = {"open.spotify.com", "play.spotify.com", "spotify.link"}
+# vm./vt. là link rút gọn khi bấm Chia sẻ trong app — yt-dlp tự lần theo chuyển
+# hướng, không cần ta giải trước.
+TIKTOK_HOSTS = {
+    "tiktok.com", "www.tiktok.com", "m.tiktok.com",
+    "vm.tiktok.com", "vt.tiktok.com",
+}
 
 # Bài dài hơn mốc này gần như chắc chắn không phải một ca khúc: mix DJ, podcast,
 # livestream vài tiếng. Chặn từ đầu, đừng để GPU chạy 20 phút rồi mới vỡ.
@@ -130,9 +136,19 @@ BROWSER_UA = (
 # phải robot" của YouTube (xem README). Không có thì bỏ qua, không phải lỗi.
 COOKIE_PATHS = ("/data/cookies.txt", "/models/cookies.txt")
 
+# Địa chỉ proxy (một dòng, dạng http://user:pass@host:port). Proxy dân cư là
+# cách duy nhất chữa dứt điểm việc bị chặn theo IP, nhưng phải trả tiền — để
+# ngỏ đường cắm vào, ai cần thì nạp file, không cần sửa code.
+PROXY_PATHS = ("/data/proxy.txt", "/models/proxy.txt")
+
+# Thứ tự thử khi bị chặn bot. Theo tài liệu PO Token của yt-dlp, ba client sau
+# không cần PO token nên còn cơ may lọt khi không có cookie; client mặc định
+# vẫn thử đầu tiên vì khi thông thì nó cho chất lượng tốt nhất.
+PLAYER_CLIENT_CHAIN = (None, ["tv"], ["android_vr"], ["web_embedded"])
+
 
 def _classify_link(url: str) -> str:
-    """Trả về "youtube" | "spotify", hoặc ném ValueError nếu không nhận."""
+    """Trả về "youtube" | "spotify" | "tiktok", hoặc ném ValueError."""
     parts = urllib.parse.urlparse(url)
     if parts.scheme not in ("http", "https"):
         raise ValueError("Link phải bắt đầu bằng http:// hoặc https://")
@@ -142,7 +158,9 @@ def _classify_link(url: str) -> str:
         return "youtube"
     if host in SPOTIFY_HOSTS:
         return "spotify"
-    raise ValueError("Hiện chỉ nhận link YouTube hoặc Spotify.")
+    if host in TIKTOK_HOSTS:
+        return "tiktok"
+    raise ValueError("Hiện chỉ nhận link YouTube, Spotify hoặc TikTok.")
 
 
 def _http_get(url: str, timeout: int = 15) -> str:
@@ -255,13 +273,19 @@ def _looks_like_bot_check(message: str) -> bool:
     )
 
 
-def _friendly_download_error(exc: Exception) -> str:
+def _friendly_download_error(exc: Exception, kind: str = "youtube") -> str:
     msg = str(exc)
     if _looks_like_bot_check(msg):
+        if kind == "tiktok":
+            return (
+                "TikTok đang chặn máy chủ và đòi xác minh không phải robot. "
+                "Tải video về máy rồi dùng Cách 1 ở trên."
+            )
         return (
             "YouTube đang chặn máy chủ và đòi xác minh không phải robot. "
-            "Tải file về máy rồi dùng ô \"Tải file lên\", hoặc nạp cookie cho "
-            "backend (xem README, mục Tải nhạc từ link)."
+            "Cách nhanh nhất: tải bài về máy rồi dùng Cách 1 ở trên. "
+            "Cách chữa lâu dài: nạp cookie cho backend — chạy workflow "
+            "\"Nạp cookie YouTube\" trên GitHub (xem README, mục Tải nhạc từ link)."
         )
     low = msg.lower()
     if "private" in low or "members-only" in low:
@@ -278,6 +302,83 @@ def _cookie_file() -> str | None:
         if os.path.exists(path):
             return path
     return None
+
+
+def _proxy_url() -> str | None:
+    for path in PROXY_PATHS:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as fh:
+                value = fh.read().strip()
+        except OSError:
+            continue
+        if value.startswith(("http://", "https://", "socks5://", "socks5h://")):
+            return value
+    return None
+
+
+# Cookie đăng nhập của Google. Thiếu sạch nhóm này thì file chỉ là cookie khách
+# vãng lai — có nạp cũng không qua được màn chặn bot.
+AUTH_COOKIE_NAMES = {
+    "SID", "HSID", "SSID", "APISID", "SAPISID", "LOGIN_INFO",
+    "__Secure-1PSID", "__Secure-3PSID", "__Secure-1PAPISID", "__Secure-3PAPISID",
+}
+
+
+def _cookie_status() -> dict:
+    """Tóm tắt tình trạng file cookie. Không trả về giá trị cookie nào.
+
+    Chỉ đếm và xem hạn — đủ để biết đã nạp đúng chưa mà không biến endpoint này
+    thành chỗ rò cookie đăng nhập.
+    """
+    path = _cookie_file()
+    if not path:
+        return {"present": False, "hint": "Chưa nạp cookie. Xem README, mục Tải nhạc từ link."}
+
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            lines = [
+                l for l in fh.read().splitlines()
+                if l.strip() and not l.lstrip().startswith("#") and "\t" in l
+            ]
+    except OSError as exc:
+        return {"present": True, "readable": False, "error": str(exc)[:200]}
+
+    names, expiries = set(), []
+    for line in lines:
+        parts = line.split("\t")
+        if len(parts) != 7:
+            continue
+        names.add(parts[5])
+        try:
+            value = int(parts[4])
+            if value > 0:
+                expiries.append(value)
+        except ValueError:
+            pass
+
+    now = time.time()
+    live = [e for e in expiries if e > now]
+    auth = sorted(names & AUTH_COOKIE_NAMES)
+
+    out = {
+        "present": True,
+        "path": path,
+        "cookies": len(lines),
+        "auth_cookies": auth,
+        "logged_in": bool(auth),
+    }
+    if live:
+        out["expires_in_days"] = round((min(live) - now) / 86400, 1)
+    elif expiries:
+        out["expired"] = True
+
+    if not auth:
+        out["hint"] = "Thiếu cookie đăng nhập — có thể đã xuất lúc chưa đăng nhập."
+    elif out.get("expired"):
+        out["hint"] = "Cookie đã hết hạn, nạp lại file mới."
+    return out
 
 
 def _ytdlp_download(job_id: str, target: str, mark, player_client=None) -> dict:
@@ -325,6 +426,9 @@ def _ytdlp_download(job_id: str, target: str, mark, player_client=None) -> dict:
     cookies = _cookie_file()
     if cookies:
         opts["cookiefile"] = cookies
+    proxy = _proxy_url()
+    if proxy:
+        opts["proxy"] = proxy
     if player_client:
         opts["extractor_args"] = {"youtube": {"player_client": list(player_client)}}
 
@@ -368,6 +472,47 @@ def _find_downloaded(job_id: str) -> str:
     return found[0]
 
 
+def _clear_partials(job_id: str) -> None:
+    """Xoá file dở của lần thử trước.
+
+    Mỗi lần thử dùng chung một outtmpl, nên mảnh .part còn sót lại có thể làm
+    _find_downloaded() vớ nhầm file hỏng của lần trước.
+    """
+    for path in glob.glob(f"/data/{job_id}/input.*"):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _download_with_fallbacks(job_id: str, target: str, mark, kind: str = "youtube") -> dict:
+    """Thử lần lượt các player client cho tới khi qua được màn chặn bot.
+
+    Chỉ đổi client khi lỗi đúng là bị chặn bot; lỗi khác (video riêng tư, bài
+    quá dài, mạng hỏng) thì ném ra ngay — thử lại chỉ tổ mất thêm vài chục giây
+    rồi cũng hỏng y như vậy.
+
+    Chuỗi client là thứ riêng của YouTube (extractor_args gắn khoá "youtube").
+    Nguồn khác thì thử lại y hệt 4 lần, chỉ mất thời gian — nên chạy một lần.
+    """
+    chain = PLAYER_CLIENT_CHAIN if kind in ("youtube", "spotify") else (None,)
+
+    last = None
+    for attempt, client in enumerate(chain):
+        if attempt:
+            _clear_partials(job_id)
+            mark(status="downloading", progress=0.05,
+                 attempt=attempt + 1, player_client=",".join(client))
+        try:
+            return _ytdlp_download(job_id, target, mark, player_client=client)
+        except Exception as exc:  # noqa: BLE001
+            if not _looks_like_bot_check(str(exc)):
+                raise
+            last = exc
+
+    raise last if last else RuntimeError("Không tải được, không rõ nguyên nhân.")
+
+
 @app.function(volumes={"/data": data_vol, "/models": models_vol}, timeout=1200, retries=0)
 def fetch_and_separate(job_id: str, url: str, model_key: str):
     """Tải nhạc từ link rồi chuyển tiếp sang worker GPU.
@@ -379,6 +524,10 @@ def fetch_and_separate(job_id: str, url: str, model_key: str):
         job = jobs.get(job_id, {})
         job.update(kw)
         jobs[job_id] = job
+
+    # Gán trước khi vào try: nhánh báo lỗi bên dưới đọc kind, mà nếu hỏng ngay ở
+    # mark() đầu tiên thì kind chưa kịp có giá trị — NameError sẽ che mất lỗi thật.
+    kind = "youtube"
 
     try:
         mark(status="resolving", progress=0.02, started_at=time.time())
@@ -395,14 +544,7 @@ def fetch_and_separate(job_id: str, url: str, model_key: str):
         os.makedirs(f"/data/{job_id}", exist_ok=True)
         mark(status="downloading", progress=0.05)
 
-        try:
-            info = _ytdlp_download(job_id, target, mark)
-        except Exception as first:  # noqa: BLE001
-            # Client mặc định bị chặn thì thử "tv" — hay lọt hơn khi không cookie.
-            if not _looks_like_bot_check(str(first)):
-                raise
-            mark(status="downloading", progress=0.05)
-            info = _ytdlp_download(job_id, target, mark, player_client=["tv", "web"])
+        info = _download_with_fallbacks(job_id, target, mark, kind)
 
         path = _find_downloaded(job_id)
         size = os.path.getsize(path)
@@ -433,7 +575,8 @@ def fetch_and_separate(job_id: str, url: str, model_key: str):
         # Lỗi do link người dùng đưa vào — nói thẳng, không bọc thêm.
         mark(status="error", error=str(exc)[:400], finished_at=time.time())
     except Exception as exc:  # noqa: BLE001
-        mark(status="error", error=_friendly_download_error(exc), finished_at=time.time())
+        mark(status="error", error=_friendly_download_error(exc, kind),
+             finished_at=time.time())
         raise
 
 
@@ -643,7 +786,7 @@ def api():
             "models": list(MODELS),
             # Frontend dùng cờ này để ẩn tab "Dán link" nếu backend còn bản cũ.
             "link_import": True,
-            "link_sources": ["youtube", "spotify"],
+            "link_sources": ["youtube", "spotify", "tiktok"],
             "max_source_seconds": MAX_SOURCE_SECONDS,
         }
 
@@ -657,6 +800,12 @@ def api():
             return {"ok": True, "probe": gpu_probe.remote()}
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": f"{type(exc).__name__}: {exc}"[:600]}
+
+    @web.get("/diag/cookies")
+    def diag_cookies():
+        """Cookie đã nạp chưa, còn hạn bao lâu. Không trả về giá trị cookie."""
+        data_vol.reload()   # container API có thể đang giữ view cũ của volume
+        return _cookie_status()
 
     @web.get("/models")
     def list_models():

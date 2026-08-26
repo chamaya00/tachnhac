@@ -457,14 +457,15 @@
     <div class="orbar"><span>hoặc</span></div>
 
     <div class="source">
-      <label class="field" for="link">Cách 2 — dán link YouTube / Spotify</label>
+      <label class="field" for="link">Cách 2 — dán link YouTube / Spotify / TikTok</label>
       <input type="url" id="link" inputmode="url"
              placeholder="https://www.youtube.com/watch?v=…"
              autocapitalize="off" autocorrect="off" spellcheck="false">
       <p class="hint" id="linkHint">
         Máy chủ tự tải bài về rồi tách luôn. Link Spotify thì lấy tên bài và
         nghệ sĩ để tìm đúng bản đó trên YouTube. Tối đa 12 phút mỗi bài; link
-        album hay playlist chưa nhận.
+        album hay playlist chưa nhận. Tiếng trong video TikTok đã bị nén sẵn
+        nên tách ra sẽ không sạch bằng file gốc.
       </p>
       <div class="note" id="linkNote"></div>
       <button class="primary" id="goLink">Tải về và tách</button>
@@ -781,7 +782,8 @@ async function checkBackend() {
       $("linkHint").textContent =
         "Máy chủ tự tải bài về rồi tách luôn. Link Spotify thì lấy tên bài và " +
         `nghệ sĩ để tìm đúng bản đó trên YouTube. Tối đa ${Math.round(h.max_source_seconds / 60)} ` +
-        "phút mỗi bài; link album hay playlist chưa nhận.";
+        "phút mỗi bài; link album hay playlist chưa nhận. Tiếng trong video " +
+        "TikTok đã bị nén sẵn nên tách ra sẽ không sạch bằng file gốc.";
     }
   } catch (e) {
     $("linkNote").innerHTML =
@@ -846,7 +848,7 @@ $("link").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !$("goLink").disabled) $("goLink").click();
 });
 
-const LINK_RE = /^https?:\/\/([\w-]+\.)*(youtube\.com|youtu\.be|youtube-nocookie\.com|spotify\.com|spotify\.link)(\/|$)/i;
+const LINK_RE = /^https?:\/\/([\w-]+\.)*(youtube\.com|youtu\.be|youtube-nocookie\.com|spotify\.com|spotify\.link|tiktok\.com)(\/|$)/i;
 
 // ---- Job flow ------------------------------------------------------------
 const STEP = {
@@ -1040,9 +1042,9 @@ async function startJob(kind) {
   // Kiểm tra trước khi động vào giao diện, để lỗi nhập liệu không làm nhấp nháy
   // thanh tiến độ rồi biến mất.
   if (kind === "link") {
-    if (!url) { $("err").textContent = "Dán link YouTube hoặc Spotify vào ô Cách 2."; return; }
+    if (!url) { $("err").textContent = "Dán link YouTube, Spotify hoặc TikTok vào ô Cách 2."; return; }
     if (!LINK_RE.test(url)) {
-      $("err").textContent = "Chỉ nhận link YouTube hoặc Spotify.\nVí dụ: https://www.youtube.com/watch?v=…";
+      $("err").textContent = "Chỉ nhận link YouTube, Spotify hoặc TikTok.\nVí dụ: https://www.youtube.com/watch?v=…";
       return;
     }
   } else {

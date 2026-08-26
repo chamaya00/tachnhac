@@ -70,7 +70,7 @@ vướng (backend đã bật CORS `*`).
 Trang bày sẵn hai cách, cùng lúc trên một trang, mỗi cách một nút riêng:
 
 1. **Thả file từ máy** — chọn hoặc kéo thả file, như trước giờ.
-2. **Dán link YouTube/Spotify** — máy chủ tự tải bài về rồi tách.
+2. **Dán link YouTube / Spotify / TikTok** — máy chủ tự tải bài về rồi tách.
 
 Cố tình không dùng tab: tab nào cũng phải chọn sẵn một cái, mà chọn sẵn thì có
 lúc phải tự chuyển — người dùng thấy trang tự nhảy và tưởng hỏng.
@@ -79,31 +79,132 @@ lúc phải tự chuyển — người dùng thấy trang tự nhảy và tưở
 |---|---|
 | YouTube (`youtube.com`, `youtu.be`, `music.youtube.com`) | yt-dlp tải thẳng luồng audio tốt nhất, ffmpeg chuyển sang MP3 192 kbps. |
 | Spotify (`open.spotify.com/track/…`, `spotify.link`) | Đọc tên bài + nghệ sĩ từ metadata công khai, rồi tìm đúng bài đó trên YouTube. |
+| TikTok (`tiktok.com`, `vm.tiktok.com`, `vt.tiktok.com`) | Tải thẳng như YouTube. Link rút gọn `vm./vt.` được yt-dlp tự lần theo chuyển hướng. |
 
 Spotify không phát audio ra ngoài trình phát của họ nên không có đường tải thẳng
 — cách trên cũng là cách `spotdl` vẫn làm. Hệ quả: bản lấy về là bản trên
 YouTube, có thể là live, cover hay remaster khác với bản trong playlist. Nghe thử
 ở mixer trước khi tải track về.
 
+Với TikTok, tiếng trong video đã qua một lần nén khi đăng lên, nên tách ra không
+sạch bằng file gốc — dội lại, méo tiếng ở dải cao. Không phải model chạy sai, mà
+là chất lượng đầu vào. Bù lại TikTok không chặn IP máy chủ gắt như YouTube, nên
+khả năng tải được cao hơn.
+
 **Giới hạn**
 
 - Tối đa 12 phút mỗi bài (`MAX_SOURCE_SECONDS` trong `modal_app.py`). Dài hơn thì
   cắt ngắn rồi tải file lên.
 - Chỉ nhận link **một bài**. Album, playlist, podcast đều bị từ chối ngay.
-- Link ngoài hai nguồn trên bị chặn ở cả frontend lẫn backend.
+- Link ngoài ba nguồn trên bị chặn ở cả frontend lẫn backend. Hai đầu dùng cùng
+  một danh sách host, có test đối chiếu để không đầu nào nhận thứ đầu kia chặn.
 
 ### Khi YouTube đòi "xác nhận không phải robot"
 
-YouTube chặn IP trung tâm dữ liệu khá gắt, nên yt-dlp chạy trên Modal có lúc bị
-đòi xác minh. Backend tự thử lại một lần với `player_client=tv` — không ăn thì
-báo lỗi kèm hướng dẫn. Cách chữa dứt điểm là nạp cookie:
+Modal chạy trên IP trung tâm dữ liệu, mà YouTube đối xử với dải IP đó gắt nhất.
+Đây là hạn chế của chỗ đặt máy chủ, không phải lỗi cấu hình — **không có cờ nào
+bật lên là hết**.
 
-1. Dùng một tiện ích trình duyệt xuất cookie của `youtube.com` ra định dạng
-   Netscape (`cookies.txt`). Nên dùng tài khoản phụ.
-2. Đẩy lên volume: `modal volume put tachnhac-data cookies.txt /cookies.txt`
+Mục này chỉ nói về YouTube (và link Spotify, vì cuối cùng cũng tải từ YouTube).
+TikTok không dùng chuỗi client này — `extractor_args` gắn khoá `youtube` nên thử
+lại chỉ tốn thời gian; TikTok hỏng thì báo ngay.
 
-Backend tự nhận file ở `/data/cookies.txt` hoặc `/models/cookies.txt`. Không có
-file thì bỏ qua, không phải lỗi.
+**Backend đã tự làm sẵn** (không cần bạn động tay): khi trúng màn chặn bot, nó
+thử lần lượt các player client `tv` → `android_vr` → `web_embedded`. Theo tài
+liệu PO Token của yt-dlp, ba client này không cần PO token nên còn cơ may lọt
+khi không có cookie. Lỗi không phải chặn bot (video riêng tư, bài quá dài) thì
+báo ngay, không thử lại cho phí thời gian.
+
+Hết chuỗi đó mà vẫn bị chặn thì còn ba lựa chọn:
+
+| Cách | Công sức | Bền được bao lâu |
+|---|---|---|
+| Tải bài về máy rồi dùng Cách 1 trên trang | Không có gì | Mãi mãi |
+| Nạp cookie (dưới đây) | Cần máy tính một lần | Vài tuần, rồi phải nạp lại |
+| Proxy dân cư | Tốn tiền hằng tháng | Bền nhất, nhưng phải trả phí |
+
+Với nhu cầu thỉnh thoảng tách một bài, **cách đầu tiên là hợp lý nhất**. Cookie
+chỉ đáng làm nếu bạn dùng thường xuyên và ngại thao tác tải về mỗi lần.
+
+Đổi chỗ đặt backend cũng không cứu được: mọi nhà cung cấp serverless (Modal,
+Fly, Render, Lambda…) đều là IP trung tâm dữ liệu. Chỉ máy chạy trên mạng gia
+đình mới có IP dân cư.
+
+#### Proxy dân cư
+
+Backend đọc địa chỉ proxy ở `/data/proxy.txt` (hoặc `/models/proxy.txt`) và cắm
+thẳng vào yt-dlp. Chưa có file thì bỏ qua.
+
+Mua proxy dân cư ở đâu thì tuỳ bạn — repo này không đính kèm nhà cung cấp nào.
+Có địa chỉ rồi: tạo secret `YTDLP_PROXY` (dạng `http://user:pass@host:port`),
+rồi chạy workflow **Nạp cookie YouTube** với ô **Nạp cả proxy** bật lên.
+
+#### Nạp cookie là gì
+
+yt-dlp mang theo cookie đăng nhập của bạn để YouTube tưởng đây là trình duyệt
+của một người thật đã đăng nhập, thay vì một máy chủ lạ. `cookies.txt` chính là
+trạng thái đăng nhập đó xuất ra file, ở định dạng Netscape.
+
+> **Đọc trước khi làm.** Cookie đăng nhập cho phép truy cập tài khoản Google đó.
+> Dùng **tài khoản phụ, tạo riêng cho việc này** — đừng bao giờ dùng tài khoản
+> chính. Google có thể khoá tài khoản khi thấy cookie của nó được dùng từ IP
+> trung tâm dữ liệu, nên hãy coi tài khoản phụ này là thứ có thể mất.
+
+#### Các bước
+
+**Bước 1 — xuất cookie (cần máy tính, làm một lần)**
+
+Bước này không làm được trên iPhone: Safari iOS không có tiện ích xuất cookie.
+Mượn máy tính bất kỳ, dùng Chrome hay Firefox:
+
+1. Đăng nhập YouTube bằng **tài khoản phụ**. Đừng dùng cửa sổ ẩn danh — đóng
+   cửa sổ là cookie mất hiệu lực ngay.
+2. Cài một tiện ích xuất cookie định dạng Netscape (tìm "cookies.txt" trong kho
+   tiện ích của trình duyệt).
+3. Mở youtube.com rồi bấm xuất. Được file `cookies.txt`.
+4. Mở file bằng trình soạn thảo văn bản (Notepad, TextEdit ở chế độ văn bản
+   thuần) và copy **toàn bộ** nội dung.
+
+   Lỗi hay gặp nhất ở đây: copy từ cửa sổ xem trước của trình duyệt làm ký tự
+   TAB biến thành dấu cách, và file mất tác dụng hoàn toàn mà không báo gì.
+   Workflow ở bước 3 sẽ bắt được lỗi này và nói rõ.
+
+**Bước 2 — cất vào GitHub Secret (làm được trên iPhone)**
+
+Repo → **Settings** → **Secrets and variables** → **Actions** →
+**New repository secret**. Tên: `YTDLP_COOKIES`. Dán toàn bộ nội dung vừa copy
+vào ô Secret rồi lưu.
+
+Secret được mã hoá, không hiện lại trong giao diện và không lọt vào log Actions.
+
+**Bước 3 — bấm nạp (làm được trên iPhone)**
+
+Tab **Actions** → **Nạp cookie YouTube** → **Run workflow**.
+
+Workflow soi file trước khi nạp (`scripts/check_cookies.py`): thiếu TAB, hết
+hạn, chưa đăng nhập, hay nhầm cookie trang khác đều bị chặn kèm lời giải thích.
+Qua được thì nó đẩy file lên Modal Volume `tachnhac-data`.
+
+**Không cần deploy lại** — job tách nhạc sau đó tự nhặt file cookie.
+
+**Bước 4 — kiểm tra**
+
+Mở `https://<user>--tachnhac-api.modal.run/diag/cookies`. Đúng thì thấy đại loại:
+
+```json
+{"present": true, "cookies": 42, "logged_in": true,
+ "auth_cookies": ["SAPISID", "SID", "__Secure-1PSID"], "expires_in_days": 58.6}
+```
+
+Endpoint này chỉ đếm và xem hạn, không trả về giá trị cookie nào.
+
+#### Khi cookie hết hạn
+
+`expires_in_days` tụt về 0, hoặc lỗi chặn bot quay lại. YouTube huỷ cookie nhanh
+hơn khi thấy nó dùng từ IP trung tâm dữ liệu, nên vài tuần một lần là chuyện
+thường. Làm lại bước 1–3 (sửa lại secret cũ, không cần tạo mới).
+
+Muốn gỡ cookie ra: chạy lại workflow, bật ô **Xoá cookie đang có**.
 
 **Bản quyền**: chỉ dán link tới nội dung bạn có quyền sử dụng. Việc tải nhạc có
 bản quyền về thường vi phạm điều khoản dịch vụ của YouTube và có thể vi phạm luật
@@ -137,7 +238,8 @@ Weights tự tải lần chạy đầu rồi cache vào Volume `tachnhac-models`
 | "Quá thời gian chờ" | Job treo — kiểm tra log `separate` trên Modal. |
 | Báo lỗi tên model | Weights chưa tải được. Xoá Volume `tachnhac-models` rồi chạy lại. |
 | Ô dán link hiện khung vàng "Backend đang chạy bản cũ" | Backend chưa có `/jobs/link`. Vào Actions → Deploy Modal → Run workflow, chờ build xong rồi tải lại trang. Trong lúc đó vẫn tách được bằng cách thả file. |
-| "YouTube đang chặn máy chủ…" | Bị chặn bot. Nạp cookie theo mục *Tải nhạc từ link*, hoặc tải file về máy rồi dùng tab thả file. |
+| "YouTube đang chặn máy chủ…" | Cách nhanh: tải bài về máy rồi dùng Cách 1. Cách lâu dài: nạp cookie theo mục *Khi YouTube đòi "xác nhận không phải robot"*. |
+| Đã nạp cookie mà vẫn bị chặn | Mở `/diag/cookies`. `logged_in: false` = xuất lúc chưa đăng nhập. `expired: true` = nạp lại file mới. Đúng hết mà vẫn chặn thì IP của Modal đang bị siết, đành dùng Cách 1. |
 | Link Spotify ra nhầm bài | Bản khớp nhất trên YouTube không phải bản gốc. Dán thẳng link YouTube của bản bạn muốn. |
 | "Bài dài … quá mốc 12 phút" | Cắt ngắn file rồi tải lên, hoặc nới `MAX_SOURCE_SECONDS` trong `modal_app.py`. |
 
