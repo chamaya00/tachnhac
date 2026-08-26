@@ -371,22 +371,29 @@ def _cookie_status() -> dict:
     except OSError as exc:
         return {"present": True, "readable": False, "error": str(exc)[:200]}
 
-    names, expiries = set(), []
+    names, auth_expiries = set(), []
     for line in lines:
         parts = line.split("\t")
         if len(parts) != 7:
             continue
-        names.add(parts[5])
+        name = parts[5]
+        names.add(name)
+        # Chỉ quan tâm hạn của cookie ĐĂNG NHẬP. Trước đây lấy min trên mọi
+        # cookie, mà file nào cũng kèm vài cookie phụ sống có mấy tiếng — thế là
+        # số ngày luôn hiện 0.0 dù cookie đăng nhập còn hạn hàng tháng, làm
+        # người dùng tưởng hỏng.
+        if name not in AUTH_COOKIE_NAMES:
+            continue
         try:
             value = int(parts[4])
             if value > 0:
-                expiries.append(value)
+                auth_expiries.append(value)
         except ValueError:
             pass
 
     now = time.time()
-    live = [e for e in expiries if e > now]
     auth = sorted(names & AUTH_COOKIE_NAMES)
+    live = [e for e in auth_expiries if e > now]
 
     out = {
         "present": True,
@@ -397,13 +404,22 @@ def _cookie_status() -> dict:
     }
     if live:
         out["expires_in_days"] = round((min(live) - now) / 86400, 1)
-    elif expiries:
+    elif auth_expiries:
         out["expired"] = True
+    elif auth:
+        # Hạn 0 trong định dạng Netscape nghĩa là cookie phiên: mất khi đóng
+        # trình duyệt. Vẫn dùng được, nhưng không biết trước sống bao lâu.
+        out["session_only"] = True
 
     if not auth:
         out["hint"] = "Thiếu cookie đăng nhập — có thể đã xuất lúc chưa đăng nhập."
     elif out.get("expired"):
-        out["hint"] = "Cookie đã hết hạn, nạp lại file mới."
+        out["hint"] = "Cookie đăng nhập đã hết hạn, nạp lại file mới."
+    elif out.get("expires_in_days", 999) < 2:
+        out["hint"] = (
+            "Cookie đăng nhập sắp hết hạn. Nếu tải hỏng, xuất lại bằng cửa sổ ẩn "
+            "danh theo hướng dẫn của yt-dlp (xem README)."
+        )
     return out
 
 

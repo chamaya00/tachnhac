@@ -158,12 +158,22 @@ trạng thái đăng nhập đó xuất ra file, ở định dạng Netscape.
 Bước này không làm được trên iPhone: Safari iOS không có tiện ích xuất cookie.
 Mượn máy tính bất kỳ, dùng Chrome hay Firefox:
 
-1. Đăng nhập YouTube bằng **tài khoản phụ**. Đừng dùng cửa sổ ẩn danh — đóng
-   cửa sổ là cookie mất hiệu lực ngay.
-2. Cài một tiện ích xuất cookie định dạng Netscape (tìm "cookies.txt" trong kho
-   tiện ích của trình duyệt).
-3. Mở youtube.com rồi bấm xuất. Được file `cookies.txt`.
-4. **Xuất riêng youtube.com, đừng xuất cookie của mọi trang.** GitHub Secret
+1. Cài một tiện ích xuất cookie định dạng Netscape (tìm "cookies.txt" trong kho
+   tiện ích của trình duyệt). Nên chọn loại mã nguồn mở, xuất ngay trên máy.
+
+2. **Phải dùng cửa sổ ẩn danh, và làm đúng trình tự này.** YouTube xoay vòng
+   cookie liên tục trên các tab đang mở, nên cookie xuất từ phiên thường sẽ bị
+   vô hiệu ngay sau đó. Trình tự dưới đây là của chính tài liệu yt-dlp:
+
+   1. Mở một cửa sổ **ẩn danh** mới, đăng nhập YouTube bằng **tài khoản phụ**.
+   2. Vẫn trong tab đó, vào `https://www.youtube.com/robots.txt`.
+      Bảo đảm đây là tab ẩn danh **duy nhất** đang mở.
+   3. Bấm xuất cookie của `youtube.com` bằng tiện ích.
+   4. **Đóng cửa sổ ẩn danh ngay lập tức**, đừng đăng xuất.
+
+   Đóng cửa sổ ngay là để phiên đó không còn hoạt động và không xoay vòng
+   cookie nữa — đúng ngược với trực giác, nhưng đây mới là cách giữ cookie sống.
+3. **Xuất riêng youtube.com, đừng xuất cookie của mọi trang.** GitHub Secret
    chỉ nhận tối đa 48 KB; file "tất cả các trang" thường vài trăm KB và sẽ báo
    `value is too large` ở bước 2. Đa số tiện ích có tuỳ chọn xuất riêng trang
    đang mở.
@@ -183,7 +193,7 @@ Mượn máy tính bất kỳ, dùng Chrome hay Firefox:
    - macOS/Linux: `grep -E '^\.?(www\.)?(youtube|google)\.com' cookies.txt > yt.txt`
    - Windows PowerShell: `Select-String -Path cookies.txt -Pattern '(youtube|google)\.com' | ForEach-Object { $_.Line } | Set-Content yt.txt`
 
-5. Mở file bằng trình soạn thảo văn bản (Notepad, TextEdit ở chế độ văn bản
+4. Mở file bằng trình soạn thảo văn bản (Notepad, TextEdit ở chế độ văn bản
    thuần) và copy **toàn bộ** nội dung.
 
    Lỗi hay gặp nhất ở đây: copy từ cửa sổ xem trước của trình duyệt làm ký tự
@@ -278,7 +288,8 @@ Weights tự tải lần chạy đầu rồi cache vào Volume `tachnhac-models`
 | Ô dán link hiện khung vàng "Backend đang chạy bản cũ" | Backend chưa có `/jobs/link`. Vào Actions → Deploy Modal → Run workflow, chờ build xong rồi tải lại trang. Trong lúc đó vẫn tách được bằng cách thả file. |
 | "YouTube đang chặn máy chủ…" | Cách nhanh: tải bài về máy rồi dùng Cách 1. Cách lâu dài: nạp cookie theo mục *Khi YouTube đòi "xác nhận không phải robot"*. |
 | GitHub báo `value is too large` khi lưu secret | File cookie quá 48 KB vì xuất cookie của mọi trang. Lọc lại bằng `python3 scripts/check_cookies.py cookies.txt --loc yt.txt` rồi dán `yt.txt`. |
-| Đã nạp cookie mà vẫn bị chặn | Mở `/diag/cookies`. `logged_in: false` = xuất lúc chưa đăng nhập. `expired: true` = nạp lại file mới. Đúng hết mà vẫn chặn thì IP của Modal đang bị siết, đành dùng Cách 1. |
+| Đã nạp cookie mà vẫn bị chặn | Mở `/diag/cookies`. `logged_in: false` = xuất lúc chưa đăng nhập. `expired: true` = nạp lại file mới. Đúng hết mà vẫn chặn thì nhiều khả năng cookie đã bị YouTube xoay vòng — xuất lại đúng trình tự cửa sổ ẩn danh ở trên. |
+| `/diag/cookies` báo `expires_in_days` rất nhỏ | Số này tính trên cookie **đăng nhập**, không phải mọi cookie. Nhỏ thật thì cookie sắp hết hạn, xuất lại. |
 | Link Spotify ra nhầm bài | Bản khớp nhất trên YouTube không phải bản gốc. Dán thẳng link YouTube của bản bạn muốn. |
 | Không thấy hàng "Bản gốc" trong mixer | Job này chạy trên backend bản cũ (chưa có `/jobs/{id}/source`). Deploy lại qua Actions → Deploy Modal rồi tách lại — job cũ không có bản gốc để lấy. |
 | "Bài dài … quá mốc 12 phút" | Cắt ngắn file rồi tải lên, hoặc nới `MAX_SOURCE_SECONDS` trong `modal_app.py`. |
