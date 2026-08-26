@@ -163,7 +163,27 @@ Mượn máy tính bất kỳ, dùng Chrome hay Firefox:
 2. Cài một tiện ích xuất cookie định dạng Netscape (tìm "cookies.txt" trong kho
    tiện ích của trình duyệt).
 3. Mở youtube.com rồi bấm xuất. Được file `cookies.txt`.
-4. Mở file bằng trình soạn thảo văn bản (Notepad, TextEdit ở chế độ văn bản
+4. **Xuất riêng youtube.com, đừng xuất cookie của mọi trang.** GitHub Secret
+   chỉ nhận tối đa 48 KB; file "tất cả các trang" thường vài trăm KB và sẽ báo
+   `value is too large` ở bước 2. Đa số tiện ích có tuỳ chọn xuất riêng trang
+   đang mở.
+
+   Lỡ xuất cả rồi thì lọc lại (cần Python trên máy đó):
+
+   ```
+   python3 scripts/check_cookies.py cookies.txt --loc yt.txt
+   ```
+
+   Lệnh này giữ lại đúng cookie của `google.com` và `youtube.com` — cookie đăng
+   nhập nằm rải trên cả hai, `LOGIN_INFO` ở youtube còn `SID`/`SAPISID`/
+   `__Secure-1PSID` ở google — rồi báo dung lượng trước/sau. Dùng `yt.txt`.
+
+   Không có Python thì lọc bằng terminal:
+
+   - macOS/Linux: `grep -E '^\.?(www\.)?(youtube|google)\.com' cookies.txt > yt.txt`
+   - Windows PowerShell: `Select-String -Path cookies.txt -Pattern '(youtube|google)\.com' | ForEach-Object { $_.Line } | Set-Content yt.txt`
+
+5. Mở file bằng trình soạn thảo văn bản (Notepad, TextEdit ở chế độ văn bản
    thuần) và copy **toàn bộ** nội dung.
 
    Lỗi hay gặp nhất ở đây: copy từ cửa sổ xem trước của trình duyệt làm ký tự
@@ -257,6 +277,7 @@ Weights tự tải lần chạy đầu rồi cache vào Volume `tachnhac-models`
 | Báo lỗi tên model | Weights chưa tải được. Xoá Volume `tachnhac-models` rồi chạy lại. |
 | Ô dán link hiện khung vàng "Backend đang chạy bản cũ" | Backend chưa có `/jobs/link`. Vào Actions → Deploy Modal → Run workflow, chờ build xong rồi tải lại trang. Trong lúc đó vẫn tách được bằng cách thả file. |
 | "YouTube đang chặn máy chủ…" | Cách nhanh: tải bài về máy rồi dùng Cách 1. Cách lâu dài: nạp cookie theo mục *Khi YouTube đòi "xác nhận không phải robot"*. |
+| GitHub báo `value is too large` khi lưu secret | File cookie quá 48 KB vì xuất cookie của mọi trang. Lọc lại bằng `python3 scripts/check_cookies.py cookies.txt --loc yt.txt` rồi dán `yt.txt`. |
 | Đã nạp cookie mà vẫn bị chặn | Mở `/diag/cookies`. `logged_in: false` = xuất lúc chưa đăng nhập. `expired: true` = nạp lại file mới. Đúng hết mà vẫn chặn thì IP của Modal đang bị siết, đành dùng Cách 1. |
 | Link Spotify ra nhầm bài | Bản khớp nhất trên YouTube không phải bản gốc. Dán thẳng link YouTube của bản bạn muốn. |
 | Không thấy hàng "Bản gốc" trong mixer | Job này chạy trên backend bản cũ (chưa có `/jobs/{id}/source`). Deploy lại qua Actions → Deploy Modal rồi tách lại — job cũ không có bản gốc để lấy. |

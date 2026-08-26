@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
-"""Soi file cookies.txt trước khi đẩy lên Modal.
+"""Soi file cookies.txt trước khi đẩy lên Modal, và lọc bớt cho vừa GitHub Secret.
 
 Nạp nhầm một file hỏng thì backend vẫn chạy, chỉ là yt-dlp lặng lẽ bị YouTube
 chặn y như cũ — không có gì để lần ra nguyên nhân. Thà chặn ngay ở đây.
 
-Dùng:  python3 scripts/check_cookies.py cookies.txt
+Dùng:
+    python3 scripts/check_cookies.py cookies.txt            # chỉ soi
+    python3 scripts/check_cookies.py cookies.txt --loc yt.txt  # lọc rồi soi
 """
 import sys
 import time
+
+# GitHub Secret tối đa 48 KB. Nhiều tiện ích xuất cookie của MỌI trang đang mở,
+# ra file vài trăm KB — dán vào là GitHub báo "value is too large". Chỉ cookie
+# của Google/YouTube mới có tác dụng với yt-dlp, phần còn lại bỏ được hết.
+SECRET_LIMIT = 48 * 1024
+KEEP_DOMAINS = ("youtube.com", "google.com")
 
 # Cookie đăng nhập của Google. Thiếu sạch nhóm này thì file chỉ là cookie khách
 # vãng lai, nạp lên cũng vô ích.
@@ -15,6 +23,40 @@ AUTH_COOKIES = {
     "SID", "HSID", "SSID", "APISID", "SAPISID", "LOGIN_INFO",
     "__Secure-1PSID", "__Secure-3PSID", "__Secure-1PAPISID", "__Secure-3PAPISID",
 }
+
+
+def loc(src_path, out_path):
+    """Giữ lại đúng dòng cookie của Google/YouTube, ghi ra file mới.
+
+    Cookie đăng nhập nằm rải trên cả hai tên miền: LOGIN_INFO ở .youtube.com,
+    còn SID/HSID/SAPISID/__Secure-1PSID ở .google.com. Bỏ sót một bên là mất
+    tác dụng, nên giữ cả hai.
+    """
+    with open(src_path, encoding="utf-8", errors="replace") as fh:
+        lines = fh.read().splitlines()
+
+    kept = []
+    for line in lines:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        domain = line.split("\t")[0].lstrip(".").lower()
+        if any(d in domain for d in KEEP_DOMAINS):
+            kept.append(line)
+
+    with open(out_path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("# Netscape HTTP Cookie File\n")
+        fh.write("\n".join(kept) + "\n")
+
+    before = sum(len(l) + 1 for l in lines)
+    after = sum(len(l) + 1 for l in kept) + 28
+    print(f"  · Lọc: {len(lines)} dòng ({before / 1024:.0f} KB) "
+          f"-> {len(kept)} dòng ({after / 1024:.1f} KB)")
+    if after > SECRET_LIMIT:
+        print(f"  · Vẫn quá {SECRET_LIMIT // 1024} KB. Xuất lại chỉ riêng "
+              f"youtube.com, đừng xuất cookie của mọi trang.")
+    else:
+        print(f"  · Vừa GitHub Secret (giới hạn {SECRET_LIMIT // 1024} KB).")
+    return out_path
 
 
 def check(path):
@@ -101,15 +143,43 @@ def check(path):
             notes.append(f"{len(dead)} cookie đã hết hạn (bình thường, bỏ qua được).")
 
     notes.append(f"Tổng cộng {len(tabbed)} cookie, {len(domains)} tên miền.")
+
+    size = len(raw.encode("utf-8"))
+    notes.append(f"Dung lượng {size / 1024:.1f} KB.")
+    if size > SECRET_LIMIT:
+        problems.append(
+            f"File {size / 1024:.0f} KB, quá giới hạn {SECRET_LIMIT // 1024} KB của "
+            "GitHub Secret — dán vào sẽ báo \"value is too large\". "
+            "Chạy lại lệnh này kèm --loc để lọc bớt."
+        )
     return problems, notes
 
 
 def main():
-    if len(sys.argv) != 2:
-        print("Dùng: python3 scripts/check_cookies.py <cookies.txt>", file=sys.stderr)
+    args = sys.argv[1:]
+    out_path = None
+    if "--loc" in args:
+        i = args.index("--loc")
+        if i + 1 >= len(args):
+            print("--loc cần tên file đầu ra.", file=sys.stderr)
+            return 2
+        out_path = args[i + 1]
+        args = args[:i] + args[i + 2:]
+
+    if len(args) != 1:
+        print("Dùng: python3 scripts/check_cookies.py <cookies.txt> [--loc <ra.txt>]",
+              file=sys.stderr)
         return 2
 
-    problems, notes = check(sys.argv[1])
+    path = args[0]
+    if out_path:
+        try:
+            path = loc(path, out_path)
+        except OSError as exc:
+            print(f"Không lọc được: {exc}", file=sys.stderr)
+            return 1
+
+    problems, notes = check(path)
     for note in notes:
         print(f"  · {note}")
     if problems:
