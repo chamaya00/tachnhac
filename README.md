@@ -67,10 +67,13 @@ vướng (backend đã bật CORS `*`).
 
 ## Tải nhạc từ link
 
-Trang có hai đường vào, chọn bằng tab ở đầu thẻ:
+Trang bày sẵn hai cách, cùng lúc trên một trang, mỗi cách một nút riêng:
 
-1. **Dán link** — dán URL YouTube hoặc Spotify, máy chủ tự tải bài về rồi tách.
-2. **Tải file lên** — chọn hoặc kéo thả file từ máy, như trước giờ.
+1. **Thả file từ máy** — chọn hoặc kéo thả file, như trước giờ.
+2. **Dán link YouTube/Spotify** — máy chủ tự tải bài về rồi tách.
+
+Cố tình không dùng tab: tab nào cũng phải chọn sẵn một cái, mà chọn sẵn thì có
+lúc phải tự chuyển — người dùng thấy trang tự nhảy và tưởng hỏng.
 
 | Nguồn | Cách xử lý |
 |---|---|
@@ -133,7 +136,7 @@ Weights tự tải lần chạy đầu rồi cache vào Volume `tachnhac-models`
 | Kẹt ở "Đang xếp hàng…" | Container GPU chưa khởi động xong (lần đầu ~1–2 phút do phải tải weights), hoặc worker chết. Xem log trong dashboard Modal. |
 | "Quá thời gian chờ" | Job treo — kiểm tra log `separate` trên Modal. |
 | Báo lỗi tên model | Weights chưa tải được. Xoá Volume `tachnhac-models` rồi chạy lại. |
-| Tab "Dán link" bị mờ, không bấm được | Backend đang chạy bản cũ chưa có `/jobs/link`. Deploy lại app Modal. |
+| Ô dán link hiện khung vàng "Backend đang chạy bản cũ" | Backend chưa có `/jobs/link`. Vào Actions → Deploy Modal → Run workflow, chờ build xong rồi tải lại trang. Trong lúc đó vẫn tách được bằng cách thả file. |
 | "YouTube đang chặn máy chủ…" | Bị chặn bot. Nạp cookie theo mục *Tải nhạc từ link*, hoặc tải file về máy rồi dùng tab thả file. |
 | Link Spotify ra nhầm bài | Bản khớp nhất trên YouTube không phải bản gốc. Dán thẳng link YouTube của bản bạn muốn. |
 | "Bài dài … quá mốc 12 phút" | Cắt ngắn file rồi tải lên, hoặc nới `MAX_SOURCE_SECONDS` trong `modal_app.py`. |

@@ -119,36 +119,52 @@
   }
   button.primary:disabled { opacity: 0.4; cursor: default; }
 
-  /* ---- Chọn nguồn: link hay file -------------------------------------- */
-  .tabs {
-    display: flex;
-    gap: 6px;
-    background: var(--ink);
+  /* ---- Hai nguồn nhạc, cùng hiện trên một trang ------------------------ */
+  /* Cố tình KHÔNG dùng tab: tab nào cũng phải chọn sẵn một cái, mà chọn sẵn
+     thì có lúc phải tự chuyển — người dùng thấy trang tự nhảy, tưởng hỏng.
+     Bày cả hai ra, ai cần gì dùng nấy. */
+  .source {
     border: 1px solid var(--line);
-    border-radius: 11px;
-    padding: 4px;
-    margin-bottom: 18px;
+    border-radius: 12px;
+    padding: 16px;
+    background: var(--ink);
   }
-  .tab {
-    flex: 1;
-    background: transparent;
-    border: 0;
-    border-radius: 8px;
-    color: var(--muted);
-    font: inherit;
-    font-size: 13px;
-    font-weight: 600;
-    padding: 10px 8px;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .tab[aria-selected=true] {
-    background: var(--panel-hi);
-    color: var(--ivory);
-  }
-  .tab:disabled { opacity: 0.35; cursor: default; }
+  .source .primary { margin-top: 14px; }
 
-  .pane[hidden] { display: none; }
+  /* Vạch "hoặc" giữa hai cách — cho thấy chúng ngang hàng, không phải bước
+     1 rồi bước 2. */
+  .orbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 16px 0;
+    color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .orbar::before, .orbar::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+  }
+
+  /* Lời nhắc khi backend chưa deploy bản mới. Chỉ nói, không khoá, không
+     đụng vào lựa chọn của người dùng. */
+  .note {
+    display: none;
+    margin-top: 10px;
+    border: 1px solid var(--drums);
+    border-radius: 9px;
+    background: rgba(255, 180, 84, 0.09);
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  /* Câu đầu là tiêu đề, phải xuống dòng; các <b> sau chỉ để nhấn tên nút. */
+  .note > b:first-child { display: block; margin-bottom: 4px; }
 
   /* Vùng thả file — "thả" theo đúng nghĩa đen, kéo file vào là được. */
   .drop {
@@ -418,35 +434,6 @@
   <div class="banner" id="banner"></div>
 
   <div class="card">
-    <div class="tabs" role="tablist" aria-label="Nguồn nhạc">
-      <button class="tab" id="tabLink" type="button" role="tab"
-              aria-selected="true" aria-controls="paneLink">Dán link</button>
-      <button class="tab" id="tabFile" type="button" role="tab"
-              aria-selected="false" aria-controls="paneFile">Tải file lên</button>
-    </div>
-
-    <div class="row pane" id="paneLink" role="tabpanel" aria-labelledby="tabLink">
-      <label class="field" for="link">Link YouTube hoặc Spotify</label>
-      <input type="url" id="link" inputmode="url"
-             placeholder="https://www.youtube.com/watch?v=…"
-             autocapitalize="off" autocorrect="off" spellcheck="false">
-      <p class="hint">
-        Máy chủ tự tải bài về rồi tách luôn. Link Spotify thì lấy tên bài và
-        nghệ sĩ để tìm đúng bản đó trên YouTube. Tối đa 12 phút mỗi bài; link
-        album hay playlist chưa nhận.
-      </p>
-    </div>
-
-    <div class="row pane" id="paneFile" role="tabpanel" aria-labelledby="tabFile" hidden>
-      <label class="field" for="file">Chọn file âm thanh</label>
-      <div class="drop" id="drop">
-        Kéo thả file vào đây, hoặc chọn từ máy
-        <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.flac">
-        <div class="picked" id="picked"></div>
-      </div>
-      <p class="hint">MP3, WAV, M4A, FLAC… tối đa 60 MB.</p>
-    </div>
-
     <div class="row">
       <label class="field" for="model">Kiểu tách</label>
       <select id="model">
@@ -456,7 +443,33 @@
       </select>
     </div>
 
-    <button class="primary" id="go">Tách nhạc</button>
+    <div class="source">
+      <label class="field" for="file">Cách 1 — thả file từ máy</label>
+      <div class="drop" id="drop">
+        Kéo thả file vào đây, hoặc chọn từ máy
+        <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.flac">
+        <div class="picked" id="picked"></div>
+      </div>
+      <p class="hint">MP3, WAV, M4A, FLAC… tối đa 60 MB.</p>
+      <button class="primary" id="goFile">Tách file này</button>
+    </div>
+
+    <div class="orbar"><span>hoặc</span></div>
+
+    <div class="source">
+      <label class="field" for="link">Cách 2 — dán link YouTube / Spotify</label>
+      <input type="url" id="link" inputmode="url"
+             placeholder="https://www.youtube.com/watch?v=…"
+             autocapitalize="off" autocorrect="off" spellcheck="false">
+      <p class="hint" id="linkHint">
+        Máy chủ tự tải bài về rồi tách luôn. Link Spotify thì lấy tên bài và
+        nghệ sĩ để tìm đúng bản đó trên YouTube. Tối đa 12 phút mỗi bài; link
+        album hay playlist chưa nhận.
+      </p>
+      <div class="note" id="linkNote"></div>
+      <button class="primary" id="goLink">Tải về và tách</button>
+    </div>
+
     <div class="err" id="err"></div>
 
     <details class="setup" id="setup">
@@ -709,7 +722,7 @@ function failBackend(html) {
   // Chỉ lôi ô cấu hình ra khi thật sự hỏng — để còn cứu được tại chỗ.
   $("setup").style.display = "block";
   $("setup").open = true;
-  $("go").disabled = true;
+  setBusy(true);
   return false;
 }
 
@@ -756,24 +769,29 @@ async function checkBackend() {
     if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
   } catch (e) { /* giữ nguyên danh sách tĩnh trong HTML */ }
 
-  // Backend cũ chưa có /jobs/link — khoá tab lại thay vì để bấm rồi báo lỗi.
+  // Backend cũ chưa có /jobs/link. Chỉ dán một lời nhắc lên ô link — không khoá
+  // nút, không chuyển hộ người dùng sang cách khác. Bản trước tự nhảy sang phần
+  // thả file ở đây, và đứng từ ngoài nhìn thì đó y hệt một cái lỗi.
   try {
     const h = await (await fetch(`${API}/health`, { cache: "no-store" })).json();
     // Thiếu cờ = bản backend cũ hơn tính năng này, không phải "chưa bật".
     if (!h || !h.link_import) throw new Error("off");
-    if (h && h.max_source_seconds) {
-      $("paneLink").querySelector(".hint").textContent =
+    $("linkNote").style.display = "none";
+    if (h.max_source_seconds) {
+      $("linkHint").textContent =
         "Máy chủ tự tải bài về rồi tách luôn. Link Spotify thì lấy tên bài và " +
         `nghệ sĩ để tìm đúng bản đó trên YouTube. Tối đa ${Math.round(h.max_source_seconds / 60)} ` +
         "phút mỗi bài; link album hay playlist chưa nhận.";
     }
   } catch (e) {
-    $("tabLink").disabled = true;
-    $("tabLink").title = "Backend chưa hỗ trợ tải từ link — deploy lại app Modal.";
-    setMode("file");
+    $("linkNote").innerHTML =
+      "<b>Backend đang chạy bản cũ, chưa nhận link.</b>" +
+      "Vào GitHub → tab <b>Actions</b> → <b>Deploy Modal</b> → <b>Run workflow</b>, " +
+      "chờ build xong rồi tải lại trang. Trong lúc đó vẫn tách được bằng Cách 1.";
+    $("linkNote").style.display = "block";
   }
 
-  $("go").disabled = false;
+  setBusy(false);
   return true;
 }
 
@@ -789,34 +807,14 @@ $("apiSave").onclick = () => {
   checkBackend().then(ok => { if (ok) resumeJob(); });
 };
 
-// ---- Chọn nguồn: link hay file -------------------------------------------
-// "link" là mặc định — đó là đường ít bước nhất cho người mới vào.
-let mode = "link";
+// ---- Hai nguồn nhạc -------------------------------------------------------
+// Không còn khái niệm "tab đang chọn": mỗi nguồn có nút riêng, bấm nút nào thì
+// chạy nguồn đó. Nhờ vậy trang không bao giờ phải tự chuyển qua lại.
+const BUTTONS = ["goFile", "goLink"];
 
-function setMode(next) {
-  if (next === "link" && $("tabLink").disabled) return;
-  mode = next;
-  $("tabLink").setAttribute("aria-selected", String(mode === "link"));
-  $("tabFile").setAttribute("aria-selected", String(mode === "file"));
-  $("paneLink").hidden = mode !== "link";
-  $("paneFile").hidden = mode !== "file";
-  $("err").textContent = "";
+function setBusy(on) {
+  BUTTONS.forEach(id => { $(id).disabled = on; });
 }
-
-$("tabLink").onclick = () => setMode("link");
-$("tabFile").onclick = () => setMode("file");
-
-// Mũi tên trái/phải giữa hai tab — hành vi chuẩn của tablist.
-[$("tabLink"), $("tabFile")].forEach((btn, i, all) => {
-  btn.onkeydown = (e) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-    e.preventDefault();
-    const target = all[(i + (e.key === "ArrowRight" ? 1 : all.length - 1)) % all.length];
-    if (target.disabled) return;
-    target.focus();
-    target.click();
-  };
-});
 
 function showPicked() {
   const f = $("file").files[0];
@@ -842,12 +840,10 @@ drop.addEventListener("drop", (e) => {
   dt.items.add(f);
   $("file").files = dt.files;
   showPicked();
-  setMode("file");
 });
 
-// Dán link vào bất kỳ đâu trên trang khi đang ở tab link cũng ăn.
 $("link").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !$("go").disabled) $("go").click();
+  if (e.key === "Enter" && !$("goLink").disabled) $("goLink").click();
 });
 
 const LINK_RE = /^https?:\/\/([\w-]+\.)*(youtube\.com|youtu\.be|youtube-nocookie\.com|spotify\.com|spotify\.link)(\/|$)/i;
@@ -1035,7 +1031,7 @@ async function finishJob(job_id, job) {
   await loadStems(job_id, job.stems);
 }
 
-$("go").onclick = async () => {
+async function startJob(kind) {
   const model = $("model").value;
   const file = $("file").files[0];
   const url = $("link").value.trim();
@@ -1043,30 +1039,31 @@ $("go").onclick = async () => {
 
   // Kiểm tra trước khi động vào giao diện, để lỗi nhập liệu không làm nhấp nháy
   // thanh tiến độ rồi biến mất.
-  if (mode === "link") {
-    if (!url) { $("err").textContent = "Dán link YouTube hoặc Spotify vào ô trên."; return; }
+  if (kind === "link") {
+    if (!url) { $("err").textContent = "Dán link YouTube hoặc Spotify vào ô Cách 2."; return; }
     if (!LINK_RE.test(url)) {
       $("err").textContent = "Chỉ nhận link YouTube hoặc Spotify.\nVí dụ: https://www.youtube.com/watch?v=…";
       return;
     }
   } else {
-    if (!file) { $("err").textContent = "Chọn một file âm thanh."; return; }
+    if (!file) { $("err").textContent = "Chọn một file âm thanh ở Cách 1."; return; }
     if (file.size > 60 * 1024 * 1024) { $("err").textContent = "File quá lớn — tối đa 60 MB."; return; }
   }
 
-  $("go").disabled = true;
+  setBusy(true);
   $("resume").style.display = "none";
   $("mixer").style.display = "none";
   $("srcInfo").style.display = "none";
   if (playing) pause(false);
   $("progress").style.display = "block";
-  $("statusText").textContent = mode === "link" ? STEP.resolving : "Đang tải lên…";
+  $("statusText").textContent = kind === "link" ? STEP.resolving : "Đang tải lên…";
   $("barFill").style.width = "6%";
+  $("progress").scrollIntoView({ behavior: "smooth", block: "nearest" });
 
   try {
     let job_id, label;
 
-    if (mode === "link") {
+    if (kind === "link") {
       ({ job_id } = await submitLink(url, model));
       label = url;
     } else {
@@ -1088,9 +1085,12 @@ $("go").onclick = async () => {
     $("err").textContent = e.message;
     $("progress").style.display = "none";
   } finally {
-    $("go").disabled = false;
+    setBusy(false);
   }
-};
+}
+
+$("goFile").onclick = () => startJob("file");
+$("goLink").onclick = () => startJob("link");
 
 // ---- Nhặt lại job lần trước ----------------------------------------------
 async function resumeJob() {
@@ -1125,7 +1125,7 @@ async function resumeJob() {
 
   // Vẫn đang chạy ở Modal — bám lại vòng chờ thay vì bắt tách lại từ đầu.
   $("progress").style.display = "block";
-  $("go").disabled = true;
+  setBusy(true);
   try {
     const done = await pollUntilDone(saved.id, saved.at || Date.now());
     await finishJob(saved.id, done);
@@ -1133,7 +1133,7 @@ async function resumeJob() {
     $("err").textContent = e.message;
     $("progress").style.display = "none";
   } finally {
-    $("go").disabled = false;
+    setBusy(false);
   }
 }
 
