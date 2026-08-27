@@ -819,6 +819,71 @@ def _pot_status(live: bool = False) -> dict:
     return out
 
 
+def _probe_formats(url: str, client: str | None, use_cookies: bool) -> dict:
+    """Hỏi YouTube xem nó thật sự trả về những format nào.
+
+    Đến nước này mọi giả thuyết đều đã cạn, mà thông báo "không có format" thì
+    không phân biệt được hai ca hoàn toàn khác nhau: YouTube trả về danh sách
+    rỗng, hay có trả về nhưng yt-dlp lọc sạch. Nhìn thẳng vào danh sách thì hết
+    phải đoán.
+    """
+    import yt_dlp
+
+    out: dict = {"client": client or "mặc định", "cookies": use_cookies}
+
+    yt_args: dict = {"formats": ["missing_pot"]}
+    if client:
+        yt_args["player_client"] = client.split(",")
+
+    opts = {
+        "quiet": True, "no_warnings": True, "noprogress": True,
+        "skip_download": True, "socket_timeout": 30,
+        "extractor_args": {
+            "youtube": yt_args,
+            "youtubepot-bgutilscript": {"server_home": [BGUTIL_SERVER_HOME]},
+        },
+    }
+    cookies = _cookie_file() if use_cookies else None
+    if cookies:
+        opts["cookiefile"] = cookies
+    proxy = _proxy_url()
+    if proxy:
+        opts["proxy"] = proxy
+
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as exc:  # noqa: BLE001
+        out["error"] = f"{type(exc).__name__}: {exc}"[:600]
+        return out
+
+    formats = info.get("formats") or []
+    out["title"] = (info.get("title") or "")[:120]
+    out["format_count"] = len(formats)
+    audio = [f for f in formats if f.get("acodec") not in (None, "none")]
+    out["audio_count"] = len(audio)
+    # Chỉ vài dòng đầu — đủ để nhận dạng, không làm vỡ trang.
+    out["sample"] = [
+        {
+            "id": f.get("format_id"),
+            "ext": f.get("ext"),
+            "acodec": f.get("acodec"),
+            "vcodec": f.get("vcodec"),
+            "abr": f.get("abr"),
+            # Lý do yt-dlp gạt format này đi, nếu có — thường là chỗ nói thật.
+            "note": (f.get("format_note") or "")[:60],
+        }
+        for f in formats[:12]
+    ]
+    return out
+
+
+@app.function(volumes={"/data": data_vol, "/models": models_vol}, timeout=600, retries=0)
+def probe_formats(url: str, client: str | None, use_cookies: bool) -> dict:
+    data_vol.reload()
+    return _probe_formats(url, client, use_cookies)
+
+
 @app.function(volumes={"/data": data_vol, "/models": models_vol}, timeout=1200, retries=0)
 def fetch_and_separate(job_id: str, url: str, model_key: str):
     """Tải nhạc từ link rồi chuyển tiếp sang worker GPU.
@@ -1126,6 +1191,22 @@ def api():
         cũng chỉ trả về độ dài, không bao giờ trả về chính chuỗi token.
         """
         return _pot_status(live=live)
+
+    @web.get("/diag/formats")
+    def diag_formats(url: str, client: str = "", cookies: bool = True):
+        """Xem YouTube thật sự trả về format nào.
+
+        Ví dụ: /diag/formats?url=https://youtu.be/XXXX&client=tv&cookies=false
+        Mất vài chục giây. Không trả về cookie hay token nào.
+        """
+        try:
+            _classify_link(url)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        try:
+            return probe_formats.remote(url, client or None, cookies)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"[:600]}
 
     @web.get("/models")
     def list_models():
