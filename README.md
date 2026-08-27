@@ -181,6 +181,15 @@ Kiểm tra: mở `<URL backend>/diag/pot`, phải thấy `"ready": true`.
  "yt_dlp": "2026.08.19", "plugin_import": true, "ready": true}
 ```
 
+Thêm `?live=1` để **chạy thử sinh một token thật** (mất vài chục giây):
+`<URL backend>/diag/pot?live=1`. `"token_generated": true` là BotGuard hoạt
+động; `false` kèm `live_stderr` là Google từ chối BotGuard từ IP máy chủ này —
+giới hạn của chỗ đặt máy chủ, không sửa được bằng code. Dù thế nào cũng chỉ trả
+về độ dài token, không bao giờ trả về chính chuỗi đó.
+
+`ready` chỉ nói **đã cài đủ**, không nói **sinh được token** — hai chuyện khác
+nhau, và nhìn từ ngoài chúng giống hệt nhau. Đó là lý do có `?live=1`.
+
 `ready: false` thì xem khoá nào sai — thiếu file build, Node cũ hơn v22, hay
 plugin không nạp được — rồi deploy lại. Endpoint này chỉ báo trạng thái, không
 trả về token nào.

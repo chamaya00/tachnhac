@@ -720,7 +720,7 @@ def _download_with_fallbacks(job_id: str, target: str, mark, kind: str = "youtub
     raise last if last else RuntimeError("Không tải được, không rõ nguyên nhân.")
 
 
-def _pot_status() -> dict:
+def _pot_status(live: bool = False) -> dict:
     """Máy sinh PO token đã sẵn sàng chưa.
 
     Có endpoint này vì kiểu hỏng tệ nhất ở đây là hỏng ÂM THẦM: thiếu Node hay
@@ -731,6 +731,8 @@ def _pot_status() -> dict:
     import subprocess
 
     out: dict = {}
+    script = ""
+    node = None
 
     script = os.path.join(BGUTIL_SERVER_HOME, "build", "generate_once.js")
     out["script"] = script
@@ -772,6 +774,48 @@ def _pot_status() -> dict:
     )
     if not out["ready"]:
         out["hint"] = "Máy sinh PO token chưa sẵn sàng — deploy lại app Modal."
+        return out
+
+    if not live:
+        out["hint"] = "Đã cài đủ. Thêm ?live=1 để thử sinh token thật."
+        return out
+
+    # Cài đủ KHÔNG có nghĩa là sinh được token. BotGuard vẫn có thể bị Google
+    # từ chối từ IP trung tâm dữ liệu — mà nhìn từ ngoài thì hai ca đó giống hệt
+    # nhau. Chạy thẳng script một lần cho biết.
+    try:
+        res = subprocess.run(
+            [node, script, "-c", "dQw4w9WgXcQ", "--bypass-cache"],
+            capture_output=True, text=True, timeout=120,
+        )
+        out["live_returncode"] = res.returncode
+        blob = (res.stdout or "").strip()
+        token = ""
+        try:
+            token = (json.loads(blob) or {}).get("poToken") or ""
+        except Exception:  # noqa: BLE001
+            pass
+
+        out["token_generated"] = bool(token)
+        # Chỉ độ dài, không bao giờ trả về chính chuỗi token.
+        out["token_length"] = len(token)
+        if not token:
+            out["live_stderr"] = (res.stderr or "")[-500:]
+            out["live_stdout"] = blob[:300]
+            out["hint"] = (
+                "Cài đủ nhưng KHÔNG sinh được token — Google từ chối BotGuard từ "
+                "IP của máy chủ này. Đây là giới hạn của chỗ đặt máy chủ, không "
+                "sửa được bằng code."
+            )
+        else:
+            out["hint"] = "Sinh được token thật. Máy sinh PO token hoạt động."
+    except subprocess.TimeoutExpired:
+        out["token_generated"] = False
+        out["hint"] = "Sinh token quá 120 giây — coi như không dùng được."
+    except Exception as exc:  # noqa: BLE001
+        out["token_generated"] = False
+        out["live_error"] = f"{type(exc).__name__}: {exc}"[:300]
+
     return out
 
 
@@ -1075,9 +1119,13 @@ def api():
         return _cookie_status()
 
     @web.get("/diag/pot")
-    def diag_pot():
-        """Máy sinh PO token đã sẵn sàng chưa. Không trả về token nào."""
-        return _pot_status()
+    def diag_pot(live: bool = False):
+        """Máy sinh PO token đã sẵn sàng chưa.
+
+        ?live=1 chạy thử sinh một token thật (mất vài chục giây). Dù thế nào
+        cũng chỉ trả về độ dài, không bao giờ trả về chính chuỗi token.
+        """
+        return _pot_status(live=live)
 
     @web.get("/models")
     def list_models():
