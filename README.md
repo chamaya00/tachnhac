@@ -146,6 +146,22 @@ chỉ đáng làm nếu bạn dùng thường xuyên và ngại thao tác tải 
 Fly, Render, Lambda…) đều là IP trung tâm dữ liệu. Chỉ máy chạy trên mạng gia
 đình mới có IP dân cư.
 
+#### Soi danh sách format YouTube trả về
+
+`<URL backend>/diag/formats?url=<link>` chạy thẳng phần lấy thông tin rồi in ra
+YouTube thật sự trả về những format nào.
+
+Có endpoint này vì thông báo "không có format" không phân biệt được hai ca hoàn
+toàn khác nhau: YouTube trả về danh sách **rỗng**, hay có trả về nhưng yt-dlp
+**lọc sạch**. Cách chữa của hai ca đó khác hẳn nhau.
+
+Tham số: `client=tv` (hoặc `tv,web_embedded`) để ép một player client cụ thể,
+`cookies=false` để thử không cookie. Mất vài chục giây mỗi lần gọi.
+
+Trong kết quả, `format_count` là tổng số, `audio_count` là số format có tiếng,
+và `note` của từng dòng thường là chỗ yt-dlp nói thật lý do nó gạt format đó đi.
+Không trả về cookie hay token nào.
+
 #### Lần thử cuối: bỏ cookie ra
 
 Hết chuỗi client mà vẫn hỏng, backend thử nốt một lần **không dùng cookie**.
