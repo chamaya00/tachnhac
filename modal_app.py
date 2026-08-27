@@ -325,13 +325,41 @@ def _looks_like_client_broken(message: str) -> bool:
     )
 
 
+def _looks_like_no_format(message: str) -> bool:
+    """Client vào được YouTube nhưng không trả về luồng audio nào dùng được.
+
+    Khác hẳn bị chặn: đây là dấu hiệu ĐÃ QUA cửa kiểm tra. Mỗi player client
+    trả về một bộ format khác nhau, có client chỉ đưa storyboard hoặc format
+    cần PO token rồi bị lọc sạch — nên cách chữa vẫn là thử client kế tiếp.
+    """
+    low = message.lower()
+    return any(
+        s in low
+        for s in ("requested format is not available", "no video formats",
+                  "only images are available", "no formats found")
+    )
+
+
 def _should_try_other_client(message: str) -> bool:
-    return _looks_like_bot_check(message) or _looks_like_client_broken(message)
+    return (
+        _looks_like_bot_check(message)
+        or _looks_like_client_broken(message)
+        or _looks_like_no_format(message)
+    )
 
 
 def _friendly_download_error(exc: Exception, kind: str = "youtube",
                             tried: list | None = None) -> str:
     msg = str(exc)
+
+    if _looks_like_no_format(msg):
+        note = f" Đã thử {len(tried)} cách: {', '.join(tried)}." if tried else ""
+        return (
+            "Đã vào được YouTube nhưng không cách nào lấy ra luồng âm thanh "
+            "tải được." + note +
+            " Thường là bản yt-dlp trên máy chủ đã cũ — deploy lại app Modal. "
+            "Chưa được thì tải bài về máy rồi dùng Cách 1 ở trên."
+        )
 
     if _looks_like_client_broken(msg):
         note = f" Đã thử {len(tried)} cách: {', '.join(tried)}." if tried else ""
@@ -491,7 +519,10 @@ def _ytdlp_download(job_id: str, target: str, mark, player_client=None) -> dict:
             mark(status="converting", progress=0.27)
 
     opts = {
-        "format": "bestaudio/best",
+        # Nới dần: audio-only trước (nhẹ nhất), rồi bản có sẵn cả tiếng lẫn hình,
+        # cuối cùng chấp nhận bất cứ thứ gì — ffmpeg vẫn rút được tiếng ra. Kén
+        # đúng một kiểu format là gặp client trả bộ format lạ sẽ hỏng cả job.
+        "format": "bestaudio/bestaudio*/best/b",
         "outtmpl": f"/data/{job_id}/input.%(ext)s",
         "noplaylist": True,      # link kèm &list= thì chỉ lấy đúng video đó
         "playlist_items": "1",

@@ -317,6 +317,7 @@ Weights tự tải lần chạy đầu rồi cache vào Volume `tachnhac-models`
 | "YouTube đang chặn máy chủ…" | Cách nhanh: tải bài về máy rồi dùng Cách 1. Cách lâu dài: nạp cookie theo mục *Khi YouTube đòi "xác nhận không phải robot"*. |
 | GitHub báo `value is too large` khi lưu secret | File cookie quá 48 KB vì xuất cookie của mọi trang. Lọc lại bằng `python3 scripts/check_cookies.py cookies.txt --loc yt.txt` rồi dán `yt.txt`. |
 | Mở cửa sổ ẩn danh nhưng không thấy nút xuất cookie | Chưa bật tiện ích cho chế độ ẩn danh. Xem bước 2 ở mục *Các bước*. |
+| `Requested format is not available` | Client vượt được cửa chặn nhưng không trả về luồng audio nào. Backend tự thử client kế tiếp; nếu hết chuỗi vẫn vậy thì deploy lại để lấy yt-dlp mới nhất. |
 | `The page needs to be reloaded` | Bản yt-dlp trên máy chủ cũ hơn thay đổi mới nhất của YouTube. Deploy lại app Modal (layer yt-dlp luôn cài lại bản mới). |
 | Đã nạp cookie mà vẫn bị chặn | Mở `/diag/cookies`. `logged_in: false` = xuất lúc chưa đăng nhập. `expired: true` = nạp lại file mới. Đúng hết mà vẫn chặn thì nhiều khả năng cookie đã bị YouTube xoay vòng — xuất lại đúng trình tự cửa sổ ẩn danh ở trên. |
 | `/diag/cookies` báo `expires_in_days` rất nhỏ | Số này tính trên cookie **đăng nhập**, không phải mọi cookie. Nhỏ thật thì cookie sắp hết hạn, xuất lại. |
