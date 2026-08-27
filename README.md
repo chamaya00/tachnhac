@@ -176,7 +176,20 @@ Mượn máy tính bất kỳ, dùng Chrome hay Firefox:
 1. Cài một tiện ích xuất cookie định dạng Netscape (tìm "cookies.txt" trong kho
    tiện ích của trình duyệt). Nên chọn loại mã nguồn mở, xuất ngay trên máy.
 
-2. **Phải dùng cửa sổ ẩn danh, và làm đúng trình tự này.** YouTube xoay vòng
+2. **Bật tiện ích đó cho chế độ ẩn danh.** Trình duyệt mặc định tắt hết tiện
+   ích ở cửa sổ ẩn danh, nên bỏ qua bước này là tới bước sau không có nút nào
+   để bấm.
+
+   - Chrome / Edge / Cốc Cốc: vào `chrome://extensions`, tìm tiện ích, bấm
+     **Details** (Chi tiết), bật **Allow in Incognito** (Cho phép ở chế độ ẩn
+     danh).
+   - Firefox: vào `about:addons` → **Extensions**, bấm vào tiện ích, mục
+     **Run in Private Windows** chọn **Allow**.
+
+   Xuất xong tắt lại công tắc này cũng được — nó cho tiện ích đọc cookie của cả
+   phiên ẩn danh, chỉ nên bật khi cần.
+
+3. **Phải dùng cửa sổ ẩn danh, và làm đúng trình tự này.** YouTube xoay vòng
    cookie liên tục trên các tab đang mở, nên cookie xuất từ phiên thường sẽ bị
    vô hiệu ngay sau đó. Trình tự dưới đây là của chính tài liệu yt-dlp:
 
@@ -188,10 +201,10 @@ Mượn máy tính bất kỳ, dùng Chrome hay Firefox:
 
    Đóng cửa sổ ngay là để phiên đó không còn hoạt động và không xoay vòng
    cookie nữa — đúng ngược với trực giác, nhưng đây mới là cách giữ cookie sống.
-3. **Xuất riêng youtube.com, đừng xuất cookie của mọi trang.** GitHub Secret
+4. **Xuất riêng youtube.com, đừng xuất cookie của mọi trang.** GitHub Secret
    chỉ nhận tối đa 48 KB; file "tất cả các trang" thường vài trăm KB và sẽ báo
-   `value is too large` ở bước 2. Đa số tiện ích có tuỳ chọn xuất riêng trang
-   đang mở.
+   `value is too large` ở **Bước 2 — Cất vào GitHub Secret**. Đa số tiện ích có
+   tuỳ chọn xuất riêng trang đang mở.
 
    Lỡ xuất cả rồi thì lọc lại (cần Python trên máy đó):
 
@@ -208,7 +221,7 @@ Mượn máy tính bất kỳ, dùng Chrome hay Firefox:
    - macOS/Linux: `grep -E '^\.?(www\.)?(youtube|google)\.com' cookies.txt > yt.txt`
    - Windows PowerShell: `Select-String -Path cookies.txt -Pattern '(youtube|google)\.com' | ForEach-Object { $_.Line } | Set-Content yt.txt`
 
-4. Mở file bằng trình soạn thảo văn bản (Notepad, TextEdit ở chế độ văn bản
+5. Mở file bằng trình soạn thảo văn bản (Notepad, TextEdit ở chế độ văn bản
    thuần) và copy **toàn bộ** nội dung.
 
    Lỗi hay gặp nhất ở đây: copy từ cửa sổ xem trước của trình duyệt làm ký tự
@@ -303,6 +316,7 @@ Weights tự tải lần chạy đầu rồi cache vào Volume `tachnhac-models`
 | Ô dán link hiện khung vàng "Backend đang chạy bản cũ" | Backend chưa có `/jobs/link`. Vào Actions → Deploy Modal → Run workflow, chờ build xong rồi tải lại trang. Trong lúc đó vẫn tách được bằng cách thả file. |
 | "YouTube đang chặn máy chủ…" | Cách nhanh: tải bài về máy rồi dùng Cách 1. Cách lâu dài: nạp cookie theo mục *Khi YouTube đòi "xác nhận không phải robot"*. |
 | GitHub báo `value is too large` khi lưu secret | File cookie quá 48 KB vì xuất cookie của mọi trang. Lọc lại bằng `python3 scripts/check_cookies.py cookies.txt --loc yt.txt` rồi dán `yt.txt`. |
+| Mở cửa sổ ẩn danh nhưng không thấy nút xuất cookie | Chưa bật tiện ích cho chế độ ẩn danh. Xem bước 2 ở mục *Các bước*. |
 | `The page needs to be reloaded` | Bản yt-dlp trên máy chủ cũ hơn thay đổi mới nhất của YouTube. Deploy lại app Modal (layer yt-dlp luôn cài lại bản mới). |
 | Đã nạp cookie mà vẫn bị chặn | Mở `/diag/cookies`. `logged_in: false` = xuất lúc chưa đăng nhập. `expired: true` = nạp lại file mới. Đúng hết mà vẫn chặn thì nhiều khả năng cookie đã bị YouTube xoay vòng — xuất lại đúng trình tự cửa sổ ẩn danh ở trên. |
 | `/diag/cookies` báo `expires_in_days` rất nhỏ | Số này tính trên cookie **đăng nhập**, không phải mọi cookie. Nhỏ thật thì cookie sắp hết hạn, xuất lại. |
