@@ -155,6 +155,33 @@ chỉ đáng làm nếu bạn dùng thường xuyên và ngại thao tác tải 
 Fly, Render, Lambda…) đều là IP trung tâm dữ liệu. Chỉ máy chạy trên mạng gia
 đình mới có IP dân cư.
 
+#### Kết luận sau khi đo tận nơi
+
+Đã chạy hết mọi cách và đo bằng `/diag/formats`. Kết quả trên một tài khoản đã
+đăng nhập hợp lệ, yt-dlp mới nhất, PO token sinh được thật:
+
+```json
+{"client": "web", "cookies": true, "title": "<đúng tên bài>",
+ "format_count": 3, "audio_count": 0,
+ "sample": [{"id": "sb0", "note": "storyboard"}, ...]}
+```
+
+Ba format trả về đều là **storyboard** — ảnh thu nhỏ. Phần `streamingData`, nơi
+chứa mọi luồng âm thanh và hình, **trống rỗng**.
+
+Nghĩa là YouTube nhận yêu cầu, trả đúng metadata, nhưng từ chối giao luồng phát
+cho IP này. Không phải yt-dlp lọc sai, không phải thiếu token, không phải chọn
+nhầm client — `missing_pot` cũng vô nghĩa vì không có gì để mở khoá.
+
+**Biến duy nhất còn lại là địa chỉ IP.** Những cách sau đều đã thử và KHÔNG
+giải quyết được: nạp cookie, đổi player client (`web`, `web_safari`, `mweb`,
+`web_embedded`, `tv`, `android_vr`), cập nhật yt-dlp, `formats=missing_pot`, và
+cài máy sinh PO token bằng BotGuard.
+
+Còn đúng hai đường: **proxy dân cư** (đường cắm đã có sẵn, chỉ cần nạp địa chỉ),
+hoặc **tải file về máy rồi dùng Cách 1**. TikTok và Spotify không vướng chuyện
+này.
+
 #### Soi danh sách format YouTube trả về
 
 `<URL backend>/diag/formats?url=<link>` chạy thẳng phần lấy thông tin rồi in ra

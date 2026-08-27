@@ -399,10 +399,11 @@ def _friendly_download_error(exc: Exception, kind: str = "youtube",
     if _looks_like_no_format(msg):
         note = f" Đã thử {len(tried)} cách: {', '.join(tried)}." if tried else ""
         return (
-            "Đã vào được YouTube nhưng không cách nào lấy ra luồng âm thanh "
-            "tải được." + note +
-            " Thường là bản yt-dlp trên máy chủ đã cũ — deploy lại app Modal. "
-            "Chưa được thì tải bài về máy rồi dùng Cách 1 ở trên."
+            "YouTube nhận ra đây là máy chủ và không giao luồng âm thanh, dù "
+            "đăng nhập hợp lệ." + note +
+            " Đây là giới hạn của chỗ đặt máy chủ, không sửa được bằng cách "
+            "thử lại hay deploy lại. Dùng Cách 1 ở trên: tải bài về máy rồi "
+            "thả file vào — máy bạn dùng IP dân cư nên không bị chặn."
         )
 
     if _looks_like_client_broken(msg):
