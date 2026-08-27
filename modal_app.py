@@ -215,10 +215,18 @@ PLAYER_CLIENT_CHAIN = (None, ["tv"], ["android_vr"], ["web_embedded"])
 # Thứ tự dưới đây theo đúng cách maintainer yt-dlp khuyên trong issue #17389:
 # ép player_client=default,web_embedded để né tv_downgraded.
 PLAYER_CLIENT_CHAIN_COOKIES = (
-    ["default", "web_embedded"],
+    # Ba client đầu ĐỀU CẦN PO token — và ta có máy sinh token thật (xem
+    # /diag/pot?live=1). Trước đây chuỗi này chỉ gồm client không cần token,
+    # nên máy sinh token dựng xong rồi nằm không, chưa lần nào được gọi tới.
+    ["web"],
+    ["web_safari"],
+    ["mweb"],
+    # Hai cái sau không cần token, để dự phòng.
     ["web_embedded"],
-    ["tv"],
     ["android_vr"],
+    # Cố tình KHÔNG có "tv": khi đã đăng nhập, yt-dlp đổi nó thành
+    # tv_downgraded, mà client đó đang hỏng — đo tận nơi bằng /diag/formats
+    # cũng ra đúng "The page needs to be reloaded".
 )
 
 

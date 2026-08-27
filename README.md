@@ -116,6 +116,15 @@ liệu PO Token của yt-dlp, ba client này không cần PO token nên còn cơ
 khi không có cookie. Lỗi không phải chặn bot (video riêng tư, bài quá dài) thì
 báo ngay, không thử lại cho phí thời gian.
 
+**Chuỗi khi có cookie ưu tiên client CẦN PO token** (`web` → `web_safari` →
+`mweb`), rồi mới tới hai client không cần token làm dự phòng (`web_embedded`,
+`android_vr`). Lý do: máy sinh PO token chỉ được gọi tới khi client thật sự cần
+nó — chuỗi cũ toàn client không cần token, nên provider dựng xong rồi nằm không.
+
+`tv` bị loại khỏi chuỗi có cookie: khi đã đăng nhập, yt-dlp đổi nó thành
+`tv_downgraded`, mà client đó đang hỏng. Đo tận nơi bằng `/diag/formats?client=tv`
+cũng ra đúng *"The page needs to be reloaded"*. Chuỗi không cookie vẫn giữ `tv`.
+
 **Khi đã nạp cookie thì đi chuỗi khác.** Với tài khoản đã đăng nhập, yt-dlp mặc
 định chọn client `tv_downgraded`, mà client đó đang hỏng — YouTube trả về *"The
 page needs to be reloaded"*. Nghịch lý: nạp cookie xong lại hỏng theo kiểu mới.
