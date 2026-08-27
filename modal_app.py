@@ -51,7 +51,40 @@ image = (
     # một bản yt-dlp đứng yên là hỏng vĩnh viễn — deploy lại bao nhiêu lần cũng
     # không cứu được. Đặt cuối để layer nặng (torch, CUDA) vẫn dùng cache; riêng
     # layer này mất thêm khoảng 20 giây mỗi lần deploy.
-    .pip_install("yt-dlp", extra_options="--upgrade", force_build=True)
+    # ---- Máy sinh PO token -------------------------------------------------
+    # YouTube đòi PO token — chuỗi do JavaScript của chính họ sinh ra trong
+    # trình duyệt thật. yt-dlp không tự tạo được, thiếu nó thì không format nào
+    # tải được DÙ cookie đã đăng nhập thành công. bgutil chạy BotGuard bằng
+    # Node để sinh chuỗi đó.
+    #
+    # Đặt trước layer yt-dlp: layer kia có force_build nên rebuild mỗi lần
+    # deploy, mà npm ci + tsc thì nặng, không đáng chạy lại mỗi lần.
+    .run_commands(
+        # git đã có từ apt_install phía trên; chỉ thiếu curl và xz để lấy Node.
+        "apt-get update && apt-get install -y --no-install-recommends curl xz-utils"
+        " && rm -rf /var/lib/apt/lists/*",
+        # Node của Ubuntu 22.04 quá cũ — plugin đòi tối thiểu v22.
+        "curl -fsSL https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.xz"
+        " -o /tmp/node.tar.xz",
+        "mkdir -p /opt/node"
+        " && tar -xJf /tmp/node.tar.xz -C /opt/node --strip-components=1"
+        " && rm /tmp/node.tar.xz",
+        "ln -sf /opt/node/bin/node /usr/local/bin/node"
+        " && ln -sf /opt/node/bin/npm /usr/local/bin/npm"
+        " && ln -sf /opt/node/bin/npx /usr/local/bin/npx",
+        "git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider"
+        " /opt/bgutil",
+        "cd /opt/bgutil/server && npm ci && npx tsc",
+        # Chốt ngay lúc build. Thiếu file này thì lúc chạy thật plugin lặng lẽ
+        # bỏ qua và ta lại mất một vòng đoán mò — thà vỡ ở đây, ồn ào và rõ ràng.
+        "test -f /opt/bgutil/server/build/generate_once.js",
+        "node --version",
+    )
+    # Plugin nằm cùng layer với yt-dlp để hai bên luôn khớp phiên bản.
+    .pip_install(
+        "yt-dlp", "bgutil-ytdlp-pot-provider",
+        extra_options="--upgrade", force_build=True,
+    )
 )
 
 app = modal.App(APP_NAME, image=image)
@@ -162,6 +195,9 @@ BROWSER_UA = (
 # Đặt file cookie Netscape ở một trong hai chỗ này để vượt màn "xác nhận không
 # phải robot" của YouTube (xem README). Không có thì bỏ qua, không phải lỗi.
 COOKIE_PATHS = ("/data/cookies.txt", "/models/cookies.txt")
+
+# Nơi image đặt bản build của máy sinh PO token.
+BGUTIL_SERVER_HOME = "/opt/bgutil/server"
 
 # Địa chỉ proxy (một dòng, dạng http://user:pass@host:port). Proxy dân cư là
 # cách duy nhất chữa dứt điểm việc bị chặn theo IP, nhưng phải trả tiền — để
@@ -563,7 +599,14 @@ def _ytdlp_download(job_id: str, target: str, mark, player_client=None,
     yt_args = {"formats": ["missing_pot"]}
     if player_client:
         yt_args["player_client"] = list(player_client)
-    opts["extractor_args"] = {"youtube": yt_args}
+
+    opts["extractor_args"] = {
+        "youtube": yt_args,
+        # Trỏ plugin tới bản build của máy sinh token. Chạy kiểu "script": mỗi
+        # lần gọi bung một tiến trình Node, không cần máy chủ nền chạy suốt —
+        # hợp với container tạm của Modal. Bản thân nó có cache token 6 giờ.
+        "youtubepot-bgutilscript": {"server_home": [BGUTIL_SERVER_HOME]},
+    }
 
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(target, download=False)
@@ -670,6 +713,61 @@ def _download_with_fallbacks(job_id: str, target: str, mark, kind: str = "youtub
             last = exc
 
     raise last if last else RuntimeError("Không tải được, không rõ nguyên nhân.")
+
+
+def _pot_status() -> dict:
+    """Máy sinh PO token đã sẵn sàng chưa.
+
+    Có endpoint này vì kiểu hỏng tệ nhất ở đây là hỏng ÂM THẦM: thiếu Node hay
+    thiếu file build thì plugin lặng lẽ bỏ qua, yt-dlp vẫn chạy, vẫn báo "không
+    có format" y hệt như khi chưa cài gì. Nhìn từ ngoài không phân biệt được.
+    """
+    import shutil
+    import subprocess
+
+    out: dict = {}
+
+    script = os.path.join(BGUTIL_SERVER_HOME, "build", "generate_once.js")
+    out["script"] = script
+    out["script_exists"] = os.path.isfile(script)
+
+    node = shutil.which("node")
+    out["node"] = node
+    if node:
+        try:
+            res = subprocess.run([node, "--version"], capture_output=True,
+                                 text=True, timeout=15)
+            version = res.stdout.strip()
+            out["node_version"] = version
+            # Plugin đòi tối thiểu v22; thấp hơn là nó im lặng không dùng.
+            try:
+                out["node_ok"] = int(version.lstrip("v").split(".")[0]) >= 22
+            except ValueError:
+                out["node_ok"] = False
+        except Exception as exc:  # noqa: BLE001
+            out["node_error"] = f"{type(exc).__name__}: {exc}"[:200]
+
+    try:
+        import yt_dlp
+
+        out["yt_dlp"] = yt_dlp.version.__version__
+    except Exception as exc:  # noqa: BLE001
+        out["yt_dlp_error"] = f"{type(exc).__name__}: {exc}"[:200]
+
+    try:
+        import yt_dlp_plugins.extractor.getpot_bgutil_script  # noqa: F401
+
+        out["plugin_import"] = True
+    except Exception as exc:  # noqa: BLE001
+        out["plugin_import"] = False
+        out["plugin_error"] = f"{type(exc).__name__}: {exc}"[:200]
+
+    out["ready"] = bool(
+        out.get("script_exists") and out.get("node_ok") and out.get("plugin_import")
+    )
+    if not out["ready"]:
+        out["hint"] = "Máy sinh PO token chưa sẵn sàng — deploy lại app Modal."
+    return out
 
 
 @app.function(volumes={"/data": data_vol, "/models": models_vol}, timeout=1200, retries=0)
@@ -970,6 +1068,11 @@ def api():
         """Cookie đã nạp chưa, còn hạn bao lâu. Không trả về giá trị cookie."""
         data_vol.reload()   # container API có thể đang giữ view cũ của volume
         return _cookie_status()
+
+    @web.get("/diag/pot")
+    def diag_pot():
+        """Máy sinh PO token đã sẵn sàng chưa. Không trả về token nào."""
+        return _pot_status()
 
     @web.get("/models")
     def list_models():

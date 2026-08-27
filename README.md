@@ -169,11 +169,25 @@ qua được cửa, vào được nhà, nhưng không lấy được gì ra.
 Backend đã bật `formats=missing_pot` để dùng cả những format thiếu token. Cách
 này thường đủ, nhưng các format đó có thể bị bóp băng thông hoặc đứt giữa chừng.
 
-Nếu vẫn hỏng thì phải cấp PO token thật, bằng plugin
-`bgutil-ytdlp-pot-provider`: nó chạy một máy chủ Node nhỏ sinh token bằng
-BotGuard. Chưa cài trong repo này vì phải kéo thêm Node vào image và dựng thêm
-một tiến trình nền — đáng làm nếu bạn dùng thường xuyên, quá nặng nếu chỉ tách
-vài bài.
+**Đã cài sẵn máy sinh PO token** (`bgutil-ytdlp-pot-provider`): image kèm Node
+22 và bản build của BotGuard ở `/opt/bgutil/server`. Chạy kiểu *script* — mỗi
+lần gọi bung một tiến trình Node rồi tắt, không có máy chủ nền chạy suốt, hợp
+với container tạm của Modal. Bản thân nó cache token 6 giờ.
+
+Kiểm tra: mở `<URL backend>/diag/pot`, phải thấy `"ready": true`.
+
+```json
+{"script_exists": true, "node_version": "v22.23.2", "node_ok": true,
+ "yt_dlp": "2026.08.19", "plugin_import": true, "ready": true}
+```
+
+`ready: false` thì xem khoá nào sai — thiếu file build, Node cũ hơn v22, hay
+plugin không nạp được — rồi deploy lại. Endpoint này chỉ báo trạng thái, không
+trả về token nào.
+
+Có endpoint này vì kiểu hỏng tệ nhất ở đây là hỏng **âm thầm**: thiếu Node hay
+thiếu file build thì plugin lặng lẽ bỏ qua, yt-dlp vẫn chạy và vẫn báo "không
+có format" y hệt như khi chưa cài gì.
 
 #### Proxy dân cư
 
