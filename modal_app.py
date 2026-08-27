@@ -710,7 +710,12 @@ def _download_with_fallbacks(job_id: str, target: str, mark, kind: str = "youtub
         try:
             return _ytdlp_download(job_id, target, mark, use_cookies=False)
         except Exception as exc:  # noqa: BLE001
-            last = exc
+            # KHÔNG ghi đè last. Lần này chỉ là phép thử phụ, và nó gần như
+            # chắc chắn dính chặn bot — để nó đè lên lỗi của đường chính (có
+            # cookie) là xoá mất đúng manh mối cần đọc.
+            mark(nocookie_error=f"{type(exc).__name__}: {exc}"[:300])
+            if last is None:
+                last = exc
 
     raise last if last else RuntimeError("Không tải được, không rõ nguyên nhân.")
 
