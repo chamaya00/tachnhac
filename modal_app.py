@@ -846,6 +846,15 @@ def _probe_formats(url: str, client: str | None, use_cookies: bool) -> dict:
     opts = {
         "quiet": True, "no_warnings": True, "noprogress": True,
         "skip_download": True, "socket_timeout": 30,
+        # Hai dòng này là cả điểm mấu chốt của phép đo.
+        #
+        # extract_info chạy luôn bước chọn định dạng, nên khi không chọn được
+        # nó ném "Requested format is not available" TRƯỚC khi ta kịp đọc danh
+        # sách — đúng thứ cần đọc. "all" khớp mọi định dạng, còn
+        # ignore_no_formats_error cho đi tiếp cả khi danh sách rỗng. Nhờ vậy
+        # mới tách được "YouTube trả về rỗng" khỏi "có trả về nhưng bị lọc".
+        "format": "all",
+        "ignore_no_formats_error": True,
         "extractor_args": {
             "youtube": yt_args,
             "youtubepot-bgutilscript": {"server_home": [BGUTIL_SERVER_HOME]},
@@ -868,6 +877,8 @@ def _probe_formats(url: str, client: str | None, use_cookies: bool) -> dict:
     formats = info.get("formats") or []
     out["title"] = (info.get("title") or "")[:120]
     out["format_count"] = len(formats)
+    if not formats:
+        out["ket_luan"] = "YouTube trả về DANH SÁCH RỖNG — không phải do lọc."
     audio = [f for f in formats if f.get("acodec") not in (None, "none")]
     out["audio_count"] = len(audio)
     # Chỉ vài dòng đầu — đủ để nhận dạng, không làm vỡ trang.
@@ -883,6 +894,10 @@ def _probe_formats(url: str, client: str | None, use_cookies: bool) -> dict:
         }
         for f in formats[:12]
     ]
+    if formats and not audio:
+        out["ket_luan"] = "Có format nhưng KHÔNG cái nào có tiếng."
+    elif audio:
+        out["ket_luan"] = f"Có {len(audio)} format có tiếng — tải được."
     return out
 
 
