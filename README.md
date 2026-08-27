@@ -146,6 +146,17 @@ chỉ đáng làm nếu bạn dùng thường xuyên và ngại thao tác tải 
 Fly, Render, Lambda…) đều là IP trung tâm dữ liệu. Chỉ máy chạy trên mạng gia
 đình mới có IP dân cư.
 
+#### Lần thử cuối: bỏ cookie ra
+
+Hết chuỗi client mà vẫn hỏng, backend thử nốt một lần **không dùng cookie**.
+
+Nghe ngược đời, nhưng cookie là con dao hai lưỡi: nó giải được cửa chặn bot,
+đổi lại YouTube phục vụ phiên đăng nhập bằng một đường khác — có lúc đường đó
+không kèm luồng tải được. Chưa bỏ cookie ra thì chưa thể kết luận cookie là bạn
+hay là thù.
+
+Lần thử này hiện trong thông báo lỗi dưới tên `không cookie`.
+
 #### Khi vẫn không lấy được format nào
 
 YouTube đang siết dần việc bắt buộc **PO token** — một chuỗi do JavaScript của

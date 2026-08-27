@@ -498,7 +498,8 @@ def _cookie_status() -> dict:
     return out
 
 
-def _ytdlp_download(job_id: str, target: str, mark, player_client=None) -> dict:
+def _ytdlp_download(job_id: str, target: str, mark, player_client=None,
+                    use_cookies: bool = True) -> dict:
     """Tải audio về /data/<job_id>/input.mp3, trả về info dict của yt-dlp.
 
     `target` là URL YouTube, hoặc chuỗi "ytsearch1:..." khi nguồn là Spotify.
@@ -543,7 +544,7 @@ def _ytdlp_download(job_id: str, target: str, mark, player_client=None) -> dict:
         ],
     }
 
-    cookies = _cookie_file()
+    cookies = _cookie_file() if use_cookies else None
     if cookies:
         opts["cookiefile"] = cookies
     proxy = _proxy_url()
@@ -653,6 +654,20 @@ def _download_with_fallbacks(job_id: str, target: str, mark, kind: str = "youtub
             # Ghi vào trạng thái job để /jobs/{id} soi được sau, không chỉ nằm
             # trong log Modal.
             mark(tried_clients=list(tried))
+
+    # Hết chuỗi mà vẫn hỏng, và ta đang dùng cookie: thử nốt một lần không cookie.
+    #
+    # Cookie giải được cửa chặn bot, nhưng đổi lại YouTube phục vụ phiên đăng
+    # nhập bằng một đường khác — có lúc đường đó không kèm luồng tải được. Chưa
+    # thử bỏ cookie ra thì chưa thể kết luận cookie là bạn hay là thù.
+    if _cookie_file() and kind in ("youtube", "spotify"):
+        _clear_partials(job_id)
+        tried.append("không cookie")
+        mark(status="downloading", progress=0.05, player_client="không cookie")
+        try:
+            return _ytdlp_download(job_id, target, mark, use_cookies=False)
+        except Exception as exc:  # noqa: BLE001
+            last = exc
 
     raise last if last else RuntimeError("Không tải được, không rõ nguyên nhân.")
 
