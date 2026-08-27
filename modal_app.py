@@ -549,8 +549,20 @@ def _ytdlp_download(job_id: str, target: str, mark, player_client=None) -> dict:
     proxy = _proxy_url()
     if proxy:
         opts["proxy"] = proxy
+    # Cho phép dùng cả format thiếu PO token.
+    #
+    # YouTube đang siết dần việc bắt buộc PO token — một chuỗi do JavaScript của
+    # chính họ sinh ra trong trình duyệt thật. yt-dlp không tự tạo được. Thiếu
+    # nó thì mọi format bị lọc sạch và job chết với "Requested format is not
+    # available" NGAY CẢ KHI cookie đã đăng nhập thành công: qua được cửa, vào
+    # được nhà, nhưng không lấy được gì ra.
+    #
+    # missing_pot bảo yt-dlp cứ dùng những format đó. Đánh đổi: chúng có thể bị
+    # bóp băng thông hoặc đứt giữa chừng — nhưng có còn hơn không tải được gì.
+    yt_args = {"formats": ["missing_pot"]}
     if player_client:
-        opts["extractor_args"] = {"youtube": {"player_client": list(player_client)}}
+        yt_args["player_client"] = list(player_client)
+    opts["extractor_args"] = {"youtube": yt_args}
 
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(target, download=False)

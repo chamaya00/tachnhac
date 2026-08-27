@@ -146,6 +146,24 @@ chỉ đáng làm nếu bạn dùng thường xuyên và ngại thao tác tải 
 Fly, Render, Lambda…) đều là IP trung tâm dữ liệu. Chỉ máy chạy trên mạng gia
 đình mới có IP dân cư.
 
+#### Khi vẫn không lấy được format nào
+
+YouTube đang siết dần việc bắt buộc **PO token** — một chuỗi do JavaScript của
+chính họ sinh ra trong trình duyệt thật, để chứng minh yêu cầu đến từ chỗ hợp
+lệ. yt-dlp không tự tạo được.
+
+Thiếu nó thì mọi format bị lọc sạch, kể cả khi cookie đã đăng nhập thành công:
+qua được cửa, vào được nhà, nhưng không lấy được gì ra.
+
+Backend đã bật `formats=missing_pot` để dùng cả những format thiếu token. Cách
+này thường đủ, nhưng các format đó có thể bị bóp băng thông hoặc đứt giữa chừng.
+
+Nếu vẫn hỏng thì phải cấp PO token thật, bằng plugin
+`bgutil-ytdlp-pot-provider`: nó chạy một máy chủ Node nhỏ sinh token bằng
+BotGuard. Chưa cài trong repo này vì phải kéo thêm Node vào image và dựng thêm
+một tiến trình nền — đáng làm nếu bạn dùng thường xuyên, quá nặng nếu chỉ tách
+vài bài.
+
 #### Proxy dân cư
 
 Backend đọc địa chỉ proxy ở `/data/proxy.txt` (hoặc `/models/proxy.txt`) và cắm
@@ -317,7 +335,7 @@ Weights tự tải lần chạy đầu rồi cache vào Volume `tachnhac-models`
 | "YouTube đang chặn máy chủ…" | Cách nhanh: tải bài về máy rồi dùng Cách 1. Cách lâu dài: nạp cookie theo mục *Khi YouTube đòi "xác nhận không phải robot"*. |
 | GitHub báo `value is too large` khi lưu secret | File cookie quá 48 KB vì xuất cookie của mọi trang. Lọc lại bằng `python3 scripts/check_cookies.py cookies.txt --loc yt.txt` rồi dán `yt.txt`. |
 | Mở cửa sổ ẩn danh nhưng không thấy nút xuất cookie | Chưa bật tiện ích cho chế độ ẩn danh. Xem bước 2 ở mục *Các bước*. |
-| `Requested format is not available` | Client vượt được cửa chặn nhưng không trả về luồng audio nào. Backend tự thử client kế tiếp; nếu hết chuỗi vẫn vậy thì deploy lại để lấy yt-dlp mới nhất. |
+| `Requested format is not available` | Client vượt được cửa chặn nhưng không trả về luồng audio nào — thường do thiếu PO token. Backend đã bật `formats=missing_pot` và tự thử client kế tiếp. Hết chuỗi vẫn vậy thì cần PO token thật (xem dưới). |
 | `The page needs to be reloaded` | Bản yt-dlp trên máy chủ cũ hơn thay đổi mới nhất của YouTube. Deploy lại app Modal (layer yt-dlp luôn cài lại bản mới). |
 | Đã nạp cookie mà vẫn bị chặn | Mở `/diag/cookies`. `logged_in: false` = xuất lúc chưa đăng nhập. `expired: true` = nạp lại file mới. Đúng hết mà vẫn chặn thì nhiều khả năng cookie đã bị YouTube xoay vòng — xuất lại đúng trình tự cửa sổ ẩn danh ở trên. |
 | `/diag/cookies` báo `expires_in_days` rất nhỏ | Số này tính trên cookie **đăng nhập**, không phải mọi cookie. Nhỏ thật thì cookie sắp hết hạn, xuất lại. |
